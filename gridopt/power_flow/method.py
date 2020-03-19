@@ -65,7 +65,7 @@ class PFmethod:
         results : dict
         """
 
-        return self.results
+        return self.results.copy()
 
     def set_solver_name(self, name):
         """
