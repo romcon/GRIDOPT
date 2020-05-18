@@ -330,7 +330,7 @@ class ACPF(PFmethod):
         if gens_redispatch:    
             net.set_flags('generator',
                           ['variable', 'bounded'],
-                          'any',
+                          'redispatchable',
                           'active power')
         else:  
             net.set_flags('generator',

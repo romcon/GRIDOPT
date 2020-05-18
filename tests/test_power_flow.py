@@ -766,6 +766,54 @@ class TestPowerFlow(unittest.TestCase):
                         self.assertEqual(load.sens_P_u_bound[t],mu2[load.index_P[t]])
                         self.assertEqual(load.sens_P_l_bound[t],pi2[load.index_P[t]])
                      
+    def test_ACPF_with_redispatch(self):
+
+        case = os.path.join('tests', 'resources', 'cases', 'ieee25.raw')
+        if not os.path.isfile(case):
+            raise unittest.SkipTest('file not available')
+        
+        # Define non-redispatchable gens
+        gen_no_rdisp = range(17,22)
+
+        net = pf.Parser(case).parse(case)
+
+        method = gopt.power_flow.new_method('ACPF')
+        method.set_parameters(params={'solver': 'augl',
+                                    'gens_redispatch': True,
+                                    'weight_redispatch': 1e0,
+                                    'quiet': True})
+        method.solve(net)
+
+        # Network with no redispatchable generator
+        net_no_rdisp = method.get_results()['network snapshot']
+
+        self.assertEqual(method.get_results()['solver status'], 'solved')
+
+        for gen in net.generators:
+            gen.redispatchable = True
+        method.solve(net)
+
+        # Network with all generator redispatchable 
+        net_all_rdisp = method.get_results()['network snapshot']
+
+        for i in gen_no_rdisp:
+            net.generators[i].redispatchable = False
+        method.solve(net)
+
+        # Network with partial generator redispatchable 
+        net_part_rdisp = method.get_results()['network snapshot']
+
+        for i in range(17,22):
+            gen = net_part_rdisp.generators[i]
+            self.assertFalse(gen.is_redispatchable())
+            self.assertEqual(gen.P, net_no_rdisp.get_generator(gen.index).P)
+        
+        for i in range(22,24):
+            gen = net_part_rdisp.generators[i]
+            self.assertTrue(gen.is_redispatchable())
+            self.assertFalse(gen.P == net_no_rdisp.get_generator(gen.index).P)
+            self.assertFalse(gen.P == net_all_rdisp.get_generator(gen.index).P)
+    
     def tearDown(self):
         
         pass
