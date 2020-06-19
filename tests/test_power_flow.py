@@ -773,7 +773,7 @@ class TestPowerFlow(unittest.TestCase):
             raise unittest.SkipTest('file not available')
         
         # Define non-redispatchable gens
-        gen_no_rdisp = range(17,22)
+        gen_no_rdisp = range(10,20)
 
         net = pf.Parser(case).parse(case)
 
@@ -784,7 +784,7 @@ class TestPowerFlow(unittest.TestCase):
                                     'quiet': True})
         method.solve(net)
 
-        # Network with no redispatchable generator
+        # Network with no redispatchable generator other than slack
         net_no_rdisp = method.get_results()['network snapshot']
 
         self.assertEqual(method.get_results()['solver status'], 'solved')
@@ -803,7 +803,7 @@ class TestPowerFlow(unittest.TestCase):
         # Network with partial generator redispatchable 
         net_part_rdisp = method.get_results()['network snapshot']
 
-        for i in range(17,22):
+        for i in gen_no_rdisp:
             gen = net_part_rdisp.generators[i]
             self.assertFalse(gen.is_redispatchable())
             self.assertEqual(gen.P, net_no_rdisp.get_generator(gen.index).P)
@@ -813,6 +813,18 @@ class TestPowerFlow(unittest.TestCase):
             self.assertTrue(gen.is_redispatchable())
             self.assertFalse(gen.P == net_no_rdisp.get_generator(gen.index).P)
             self.assertFalse(gen.P == net_all_rdisp.get_generator(gen.index).P)
+        
+        bus = net.buses[2]
+        self.assertFalse(bus.is_slack())
+        for gen in bus.generators:
+            if gen.is_slack():
+                self.assertFalse(gen.is_redispatchable())
+        
+        bus.set_slack_flag(True)
+        self.assertTrue(bus.is_slack())
+        for gen in bus.generators:
+            if gen.is_slack():
+                self.assertTrue(gen.is_redispatchable())
     
     def tearDown(self):
         

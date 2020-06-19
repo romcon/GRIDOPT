@@ -327,7 +327,10 @@ class ACPF(PFmethod):
                           'voltage magnitude')
             
         # Genertors 
-        if gens_redispatch:    
+        if gens_redispatch:
+            for gen in net.generators:
+                if gen.is_slack():
+                    gen.redispatchable = True
             net.set_flags('generator',
                           ['variable', 'bounded'],
                           'redispatchable',
