@@ -29,6 +29,7 @@ class ACPF(PFmethod):
                    'weight_powers': 1e-3,    # weight for gen powers regularization
                    'weight_controls': 1e0,   # weight for control deviation penalty
                    'weight_var': 1e-5,       # weight for general variable regularization
+                   'weight_redispatch': 1e0, # weight for gen real power redispatch deviation penalty
                    'v_min_clip': 0.5,        # lower v threshold for clipping
                    'v_max_clip': 1.5,        # upper v threshold for clipping
                    'v_limits': False,        # voltage magnitude limits
@@ -266,6 +267,7 @@ class ACPF(PFmethod):
         wp = params['weight_powers']
         wc = params['weight_controls']
         wv = params['weight_var']
+        wr = params['weight_redispatch']
         v_limits = params['v_limits']
         Q_mode = params['Q_mode']
         Q_limits = params['Q_limits']
@@ -325,10 +327,13 @@ class ACPF(PFmethod):
                           'voltage magnitude')
             
         # Genertors 
-        if gens_redispatch:    
+        if gens_redispatch:
+            for gen in net.generators:
+                if gen.is_slack():
+                    gen.redispatchable = True
             net.set_flags('generator',
                           ['variable', 'bounded'],
-                          'any',
+                          'redispatchable',
                           'active power')
         else:  
             net.set_flags('generator',
@@ -445,7 +450,7 @@ class ACPF(PFmethod):
         problem.add_function(pfnet.Function('FACTS reactive power control', wc/(net.get_num_facts(True)+1.), net))
         
         if gens_redispatch:
-            problem.add_function(pfnet.Function('generation redispatch penalty', wc/(net.get_num_generators(True)+1.), net))
+            problem.add_function(pfnet.Function('generation redispatch penalty', wr/(net.get_num_generators(True)+1.), net))
             
         if Q_mode == self.CONTROL_MODE_REG and Q_limits: 
             problem.add_constraint(pfnet.Constraint('voltage set point regulation', net))

@@ -9,18 +9,21 @@
 from __future__ import print_function
 import os
 import copy
-import optalg
 import unittest
 import numpy as np
-import pfnet as pf
 from . import utils
-import gridopt as gopt
 from numpy.linalg import norm
 
+
+import optalg
+import pfnet as pf
+import gridopt as gopt
+
+
 class TestPowerFlow(unittest.TestCase):
-    
+
     def setUp(self):
-                    
+
         pass
 
     def test_ACPF_opt_controls_support(self):
@@ -88,7 +91,7 @@ class TestPowerFlow(unittest.TestCase):
                                'Q_mode': 'locked',
                                'Q_limits': False})
         self.assertRaises(ValueError, method.solve, net)
-        
+
         # Shunts
         method = gopt.power_flow.ACPF()
         method.set_parameters({'quiet': True,
@@ -175,7 +178,7 @@ class TestPowerFlow(unittest.TestCase):
 
                 parser = pf.ParserRAW()
                 net = parser.parse(case)
-                
+
                 parser.set('keep_all_out_of_service', True)
                 net_oos = parser.parse(case)
 
@@ -203,7 +206,7 @@ class TestPowerFlow(unittest.TestCase):
                 self.assertEqual(r['network snapshot'].bus_Q_mis, r_oos['network snapshot'].bus_Q_mis)
 
                 self.assertRaises(AssertionError, pf.tests.utils.compare_networks, self, r['network snapshot'], r_oos['network snapshot'])
-                
+
     def test_ACOPF_parameters(self):
 
         acopf = gopt.power_flow.ACOPF()
@@ -296,11 +299,11 @@ class TestPowerFlow(unittest.TestCase):
         case = os.path.join('tests', 'resources', 'cases', 'ieee25.raw')
         if not os.path.isfile(case):
             raise unittest.SkipTest('file not available')
-        
+
         net = pf.Parser(case).parse(case)
 
         method = gopt.power_flow.new_method('ACPF')
-        
+
         for solver in ['nr', 'augl']:
             method.set_parameters(params={'solver': solver,
                                           'quiet': True})
@@ -308,7 +311,7 @@ class TestPowerFlow(unittest.TestCase):
 
             self.assertEqual(method.get_results()['solver status'], 'solved')
             net1 = method.get_results()['network snapshot']
-            
+
             for bus in net.buses:
                 if bus.is_v_set_regulated():
                     reg_gens = [g.index for g in bus.reg_generators]
@@ -318,13 +321,13 @@ class TestPowerFlow(unittest.TestCase):
                     self.assertEqual(method.get_results()['solver status'], 'solved')
                     net2 = method.get_results()['network snapshot']
                     self.assertEqual(net.get_generator(gen.index).Q,
-                                     net2.get_generator(gen.index).Q) 
+                                     net2.get_generator(gen.index).Q)
                     self.assertNotEqual(net.get_generator(gen.index).Q,
                                         net1.get_generator(gen.index).Q)
                     gen.in_service = True
 
     def test_ACPF_with_branch_outages(self):
-            
+
         case = os.path.join('tests', 'resources', 'cases', 'ieee300.raw')
         if not os.path.isfile(case):
             raise unittest.SkipTest('file not available')
@@ -332,7 +335,7 @@ class TestPowerFlow(unittest.TestCase):
         net = pf.Parser(case).parse(case)
 
         method = gopt.power_flow.new_method('ACPF')
-        
+
         for solver in ['nr','augl']:
             method.set_parameters(params={'solver': solver,
                                           'tap_mode': 'regulating',
@@ -365,18 +368,18 @@ class TestPowerFlow(unittest.TestCase):
         for case in utils.test_cases:
 
             net = pf.Parser(case).parse(case)
-            
+
             method = gopt.power_flow.new_method('ACPF')
             method.set_parameters(params={'solver': 'nr',
                                           'quiet': True})
             method.solve(net)
-            
+
             results = method.get_results()
-            
+
             net_snap = results['network snapshot']
             self.assertLess(np.abs(net_snap.bus_P_mis), 1e-2) # MW
             self.assertLess(np.abs(net_snap.bus_Q_mis), 1e-2) # MVAr
-            
+
             eps = 1e-4
             for bus in net_snap.buses:
                 if bus.is_regulated_by_gen() and not bus.is_slack():
@@ -405,37 +408,37 @@ class TestPowerFlow(unittest.TestCase):
             self.assertEqual(net.bus_Q_mis, net_snap.bus_Q_mis)
             self.assertLess(np.abs(net.bus_P_mis), 1e-2) # MW
             self.assertLess(np.abs(net.bus_Q_mis), 1e-2) # MVAr
-                                
+
     def test_ACPF_solutions(self):
 
         print('')
-        
+
         T = 2
 
         sol_types = {'sol1': 'no--controls',
                      'sol2': 'gen-controls',
                      'sol3': 'all-controls'}
-        
+
         for case in utils.test_cases:
             for sol in list(sol_types.keys()):
                 for solver in ['nr','augl','ipopt', 'inlp']:
-                    
+
                     method = gopt.power_flow.new_method('ACPF')
                     method.set_parameters(params={'solver': solver})
-                    
+
                     net = pf.Parser(case).parse(case)
                     netMP = pf.Parser(case).parse(case,T)
-                    
+
                     self.assertEqual(net.num_periods,1)
                     self.assertEqual(netMP.num_periods,T)
 
                     # Only small
-                    if net.num_buses > 4000:
+                    if net.num_buses > 2000:
                         continue
-                    
+
                     sol_file = utils.get_pf_solution_file(case, utils.DIR_PFSOL, sol)
                     sol_data = utils.read_pf_solution_file(sol_file)
-                                          
+
                     # Set parameters
                     if sol == 'sol1':
                         method.set_parameters({'Q_limits': False})
@@ -474,10 +477,10 @@ class TestPowerFlow(unittest.TestCase):
 
                     self.assertLess(abs(net.bus_P_mis), 1e-2) # MW
                     self.assertLess(abs(net.bus_Q_mis), 1e-2) # MVAr
-                    
+
                     self.assertAlmostEqual(results['network snapshot'].bus_P_mis, net.bus_P_mis, places=10)
                     self.assertAlmostEqual(results['network snapshot'].bus_Q_mis, net.bus_Q_mis, places=10)
-                    
+
                     method.solve(netMP)
                     resultsMP = method.get_results()
                     self.assertEqual(resultsMP['solver status'],'solved')
@@ -489,7 +492,7 @@ class TestPowerFlow(unittest.TestCase):
                     self.assertLess(norm(resultsMP['network snapshot'].bus_P_mis-netMP.bus_P_mis,np.inf),1e-10)
                     self.assertLess(norm(resultsMP['network snapshot'].bus_Q_mis-netMP.bus_Q_mis,np.inf),1e-10)
                     self.assertLess(norm(resultsMP['network snapshot'].gen_P_cost-netMP.gen_P_cost,np.inf),1e-10)
-                    
+
                     # Sol validation
                     validated = ''
                     if sol_data is not None:
@@ -502,22 +505,22 @@ class TestPowerFlow(unittest.TestCase):
                         v_mag_error = []
                         v_ang_error = []
                         for bus_num,val in list(bus_data.items()):
-                        
+
                             v_mag = val['v_mag']
                             v_ang = val['v_ang']
-                        
+
                             try:
                                 busMP = netMP.get_bus_from_number(bus_num)
                                 bus = net.get_bus_from_number(bus_num)
                             except pf.NetworkError:
                                 continue
-                                                       
+
                             for t in range(T):
                                 v_mag_error.append(np.abs(busMP.v_mag[t]-v_mag))
                                 v_ang_error.append(np.abs(busMP.v_ang[t]*180./np.pi-v_ang))
                             v_mag_error.append(np.abs(bus.v_mag-v_mag))
                             v_ang_error.append(np.abs(bus.v_ang*180./np.pi-v_ang))
-                       
+
                             counter += 1
 
                         self.assertEqual(len(v_mag_error),len(v_ang_error))
@@ -538,9 +541,9 @@ class TestPowerFlow(unittest.TestCase):
     def test_ACOPF_solutions(self):
 
         print('')
-        
+
         eps = 0.5 # %
-        
+
         method_ipopt = gopt.power_flow.new_method('ACOPF')
         method_ipopt.set_parameters(params={'solver':'ipopt','quiet': True})
         method_augl = gopt.power_flow.new_method('ACOPF')
@@ -549,7 +552,7 @@ class TestPowerFlow(unittest.TestCase):
         method_inlp.set_parameters(params={'solver':'inlp','quiet': True})
 
         skipcases = ['aesoSL2014.raw','case2869.mat','case9241.mat','case32.art']
-            
+
         for case in utils.test_cases:
 
             if case.split(os.sep)[-1] in skipcases:
@@ -560,7 +563,7 @@ class TestPowerFlow(unittest.TestCase):
             # Only small
             if net.num_buses > 3300:
                 continue
-            
+
             self.assertEqual(net.num_periods,1)
 
             # IPOPT
@@ -628,23 +631,23 @@ class TestPowerFlow(unittest.TestCase):
 
         skipcases = ['case1354.mat','case2869.mat',
                      'case3375wp.mat','case9241.mat']
-        
+
         method = gopt.power_flow.new_method('DCOPF')
 
         for case in utils.test_cases:
 
             if case.split(os.sep)[-1] in skipcases:
                 continue
-        
+
             net = pf.Parser(case).parse(case,T)
 
             for branch in net.branches:
                 if branch.ratingA == 0:
                     branch.ratingA = 100
-            
+
             self.assertEqual(net.num_periods,T)
-            
-            method.set_parameters({'quiet':True, 
+
+            method.set_parameters({'quiet':True,
                                    'tol': 1e-6,
                                    'thermal_limits': True})
 
@@ -659,11 +662,11 @@ class TestPowerFlow(unittest.TestCase):
             except gopt.power_flow.PFmethodError:
                 self.assertTrue(case.split(os.sep)[-1] in infcases)
                 self.assertEqual(method.results['solver status'],'error')
-                
+
             results = method.get_results()
-                
+
             net = results['network snapshot']
-           
+
             self.assertLess(norm(results['network snapshot'].bus_P_mis-net.bus_P_mis,np.inf),1e-10)
             self.assertLess(norm(results['network snapshot'].bus_Q_mis-net.bus_Q_mis,np.inf),1e-10)
             self.assertLess(norm(results['network snapshot'].gen_P_cost-net.gen_P_cost,np.inf),1e-10)
@@ -672,7 +675,7 @@ class TestPowerFlow(unittest.TestCase):
             load_P_util0 = net.load_P_util
             self.assertTupleEqual(gen_P_cost0.shape,(T,))
             self.assertTupleEqual(load_P_util0.shape,(T,))
-            
+
             x = results['solver primal variables']
             lam0,nu0,mu0,pi0 = results['solver dual variables']
 
@@ -765,8 +768,67 @@ class TestPowerFlow(unittest.TestCase):
                         self.assertEqual(load.P[t],xx[load.index_P[t]])
                         self.assertEqual(load.sens_P_u_bound[t],mu2[load.index_P[t]])
                         self.assertEqual(load.sens_P_l_bound[t],pi2[load.index_P[t]])
-                     
-    def tearDown(self):
-        
-        pass
 
+    def test_ACPF_with_redispatch(self):
+
+        case = os.path.join('tests', 'resources', 'cases', 'ieee25.raw')
+        if not os.path.isfile(case):
+            raise unittest.SkipTest('file not available')
+
+        # Define non-redispatchable gens
+        gen_no_rdisp = range(10,20)
+
+        net = pf.Parser(case).parse(case)
+
+        method = gopt.power_flow.new_method('ACPF')
+        method.set_parameters(params={'solver': 'augl',
+                                    'gens_redispatch': True,
+                                    'weight_redispatch': 1e0,
+                                    'quiet': True})
+        method.solve(net)
+
+        # Network with no redispatchable generator other than slack
+        net_no_rdisp = method.get_results()['network snapshot']
+
+        self.assertEqual(method.get_results()['solver status'], 'solved')
+
+        for gen in net.generators:
+            gen.redispatchable = True
+        method.solve(net)
+
+        # Network with all generator redispatchable
+        net_all_rdisp = method.get_results()['network snapshot']
+
+        for i in gen_no_rdisp:
+            net.generators[i].redispatchable = False
+        method.solve(net)
+
+        # Network with partial generator redispatchable
+        net_part_rdisp = method.get_results()['network snapshot']
+
+        for i in gen_no_rdisp:
+            gen = net_part_rdisp.generators[i]
+            self.assertFalse(gen.is_redispatchable())
+            self.assertEqual(gen.P, net_no_rdisp.get_generator(gen.index).P)
+
+        for i in range(22,24):
+            gen = net_part_rdisp.generators[i]
+            self.assertTrue(gen.is_redispatchable())
+            self.assertFalse(gen.P == net_no_rdisp.get_generator(gen.index).P)
+            self.assertFalse(gen.P == net_all_rdisp.get_generator(gen.index).P)
+
+        bus = net.buses[2]
+        self.assertFalse(bus.is_slack())
+        for gen in bus.generators:
+            if gen.is_slack():
+                self.assertFalse(gen.is_redispatchable())
+
+        bus.set_slack_flag(True)
+        self.assertTrue(bus.is_slack())
+        for gen in bus.generators:
+            if gen.is_slack():
+                self.assertTrue(gen.is_redispatchable())
+
+    def tearDown(self):
+
+        pass
