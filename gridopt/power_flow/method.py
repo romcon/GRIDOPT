@@ -9,15 +9,16 @@
 import numpy as np
 from .method_error import *
 
+
 class PFmethod:
 
     def __init__(self):
         """
         Power flow method class.
         """
-        
+
         self._parameters = {}
-        
+
         self.results = {'solver name': 'unknown',
                         'solver status': 'unknown',
                         'solver message': 'none',
@@ -41,7 +42,7 @@ class PFmethod:
         -------
         prob : |Problem|
         """
-        
+
         return None
 
     def get_info_printer(self):
@@ -86,7 +87,7 @@ class PFmethod:
         ----------
         status : string
         """
-        
+
         self.results['solver status'] = status
 
     def set_solver_message(self, msg):
@@ -97,7 +98,7 @@ class PFmethod:
         ----------
         msg : string
         """
-        
+
         self.results['solver message'] = msg
 
     def set_solver_iterations(self, k):
@@ -108,7 +109,7 @@ class PFmethod:
         ----------
         k : int
         """
-        
+
         self.results['solver iterations'] = k
 
     def set_solver_time(self, t):
@@ -119,7 +120,7 @@ class PFmethod:
         ----------
         t : float
         """
-        
+
         self.results['solver time'] = t
 
     def set_solver_primal_variables(self, x):
@@ -130,7 +131,7 @@ class PFmethod:
         ----------
         x : vector
         """
-        
+
         self.results['solver primal variables'] = x
 
     def set_solver_dual_variables(self, d):
@@ -141,13 +142,13 @@ class PFmethod:
         ----------
         d : list
         """
-        
+
         self.results['solver dual variables'] = d
 
     def set_problem(self, p):
         """
         Sets problem.
-         
+
         Parameters
         ----------
         p : |Problem|
@@ -163,7 +164,7 @@ class PFmethod:
         ----------
         t : float
         """
-        
+
         self.results['problem time'] = t
 
     def set_network_snapshot(self, net):
@@ -174,7 +175,7 @@ class PFmethod:
         ----------
         net : |Network|
         """
-        
+
         self.results['network snapshot'] = net
 
     def get_parameters(self):
@@ -208,7 +209,7 @@ class PFmethod:
         dict_list = [self._parameters]
         if SOLVER_PARAMS in self._parameters:
             dict_list += list(self._parameters[SOLVER_PARAMS].values())
-            
+
         # Parameters
         if params:
             for key,value in list(params.items()):
@@ -221,13 +222,13 @@ class PFmethod:
                         parameter_dict[key] = value
                 if not valid_key:
                     invalid_params.append(key)
-                    
+
             if SOLVER_PARAMS in params and SOLVER_PARAMS in self._parameters:
                 solver_params = params[SOLVER_PARAMS]
                 for solver_name in self._parameters[SOLVER_PARAMS].keys():
                     if solver_name in solver_params:
                         self._parameters[SOLVER_PARAMS][solver_name].update(solver_params[solver_name])
-                
+
         # String-based parameters (from command-line utility)
         if strparams:
             for key,valuestr in list(strparams.items()):
@@ -256,7 +257,7 @@ class PFmethod:
         # Invalid params
         if invalid_params:
             raise PFmethodError_BadParams(invalid_params)
-                
+
     def set_results(self,results):
         """
         Sets method results.
@@ -267,16 +268,16 @@ class PFmethod:
         """
 
         self.results = results
-                
+
     def solve(self,net):
         """
         Solves power flow problem.
-        
+
         Parameters
         ----------
         net : |Network|
-        """        
-        
+        """
+
         pass
 
     def update_network(self, net):
@@ -291,4 +292,3 @@ class PFmethod:
         if self.results['network snapshot'] is not None:
             net.copy_from_network(self.results['network snapshot'], merged=True)
             net.update_properties()
-

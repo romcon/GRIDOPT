@@ -6,14 +6,15 @@
 # GRIDOPT is released under the BSD 2-clause license. #
 #*****************************************************#
 
+
 class PFmethodError(Exception):
     pass
 
-class PFmethodError_NoProblem(PFmethodError):    
+class PFmethodError_NoProblem(PFmethodError):
     def __init__(self):
         PFmethodError.__init__(self, 'no problem solved')
 
-class PFmethodError_BadProblem(PFmethodError):    
+class PFmethodError_BadProblem(PFmethodError):
     def __init__(self):
         PFmethodError.__init__(self, 'error while creating PF problem')
 
@@ -52,5 +53,3 @@ class PFmethodError_ShuntVReg(PFmethodError):
 class PFmethodError_SolverError(PFmethodError):
     def __init__(self, msg):
         PFmethodError.__init__(self, msg)
-
-

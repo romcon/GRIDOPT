@@ -12,13 +12,14 @@ import numpy as np
 from .method_error import *
 from .method import PFmethod
 
+
 class DCPF(PFmethod):
     """
     DC power flow method.
     """
 
     name = 'DCPF'
-    
+
     _parameters = {'quiet': False,
                    'solver' : 'superlu'}
     
@@ -36,7 +37,7 @@ class DCPF(PFmethod):
 
         # Parameters
         params = self._parameters
-        
+
         # Clear flags
         net.clear_flags()
 
@@ -66,23 +67,23 @@ class DCPF(PFmethod):
 
         # Return
         return problem
-                    
+
     def solve(self,net):
 
         from optalg.lin_solver import new_linsolver
-        
+
         # Parameters
         params = self._parameters
         solver_name = params['solver']
 
         # Copy network
         net = net.get_copy(merge_buses=True)
-        
+
         # Problem
         t0 = time.time()
         problem = self.create_problem(net)
         problem_time = time.time()-t0
-        
+
         A = problem.A
         b = problem.b
         x = problem.x
@@ -99,7 +100,7 @@ class DCPF(PFmethod):
             update = False
             raise PFmethodError_SolverError(e)
         finally:
-            
+
             # Update network
             if update:
                 net.set_var_values(x)

@@ -13,17 +13,18 @@ from .method_error import *
 from .method import PFmethod
 from numpy.linalg import norm
 
+
 class ACPF(PFmethod):
     """
     AC power flow method.
     """
-    
+
     CONTROL_MODE_LOCKED = 'locked'
     CONTROL_MODE_FREE = 'free'
     CONTROL_MODE_REG = 'regulating'
 
     name = 'ACPF'
-    
+
     _parameters = {'weight_vmag': 1e0,       # weight for voltage magnitude regularization
                    'weight_vang': 1e-3,      # weight for angle difference regularization
                    'weight_powers': 1e-3,    # weight for gen powers regularization
@@ -65,9 +66,9 @@ class ACPF(PFmethod):
 
     _parameters_inlp = {'feastol' : 1e-4,
                         'optol' : 1e0}
-    
+
     _parameters_nr = {}
-                  
+
     def __init__(self):
 
         from optalg.opt_solver import OptSolverAugL, OptSolverIpopt, OptSolverNR, OptSolverINLP
@@ -121,24 +122,24 @@ class ACPF(PFmethod):
         vdep_loads = params['vdep_loads']
         gens_redispatch = params['gens_redispatch']
 
-        # Check shunt options 
+        # Check shunt options
         if shunt_mode not in [self.CONTROL_MODE_LOCKED,
                                self.CONTROL_MODE_REG]:
             raise ValueError('invalid shunts mode')
         if shunt_mode == self.CONTROL_MODE_REG and not shunt_limits:
             raise ValueError('unsupported shunts configuration')
 
-        # Check tap options 
+        # Check tap options
         if tap_mode not in [self.CONTROL_MODE_LOCKED,
                                self.CONTROL_MODE_REG]:
             raise ValueError('invalid taps mode')
         if tap_mode == self.CONTROL_MODE_REG and not tap_limits:
             raise ValueError('unsupported taps configuration')
-        
+
         # Check Q options
         if Q_mode != self.CONTROL_MODE_REG:
             raise ValueError('invalid reactive power mode')
-        
+
         # Check other options
         if gens_redispatch:
             raise ValueError('generation redispatch not supported')
@@ -148,7 +149,7 @@ class ACPF(PFmethod):
             raise ValueError('CSC P DC must be locked')
         if not lock_csc_i_dc:
             raise ValueError('CSC i DC must be locked')
-        
+
         # Clear flags
         net.clear_flags()
 
@@ -167,36 +168,36 @@ class ACPF(PFmethod):
                       'variable',
                       'slack',
                       'active power')
-        
+
         net.set_flags('generator',
                       'variable',
                       'regulator',
                       'reactive power')
-        
+
         # VSC HVDC
         net.set_flags('vsc converter',
                       'variable',
                       'any',
                       ['dc power', 'active power', 'reactive power'])
-        
+
         # CSC HVDC
         net.set_flags('csc converter',
                       'variable',
                       'any',
                       ['dc power', 'active power', 'reactive power'])
-        
+
         # DC buses
         net.set_flags('dc bus',
                       'variable',
                       'any',
                       'voltage')
-        
+
         # FACTS
         net.set_flags('facts',
                       'variable',
                       'any',
                       'all')
-        
+
         # Loads
         if vdep_loads:
             for load in net.loads:
@@ -204,24 +205,24 @@ class ACPF(PFmethod):
                     net.set_flags_of_component(load,
                                                'variable',
                                                ['active power', 'reactive power'])
-                    
-        # Tap changers 
+
+        # Tap changers
         if tap_mode != self.CONTROL_MODE_LOCKED:
             net.set_flags('branch',
                           ['variable', 'fixed'],
                           'tap changer - v',
                           'tap ratio')
-        
+
         # Switched shunts
         if shunt_mode != self.CONTROL_MODE_LOCKED:
             net.set_flags('shunt',
                           ['variable', 'fixed'],
                           'switching - v',
                           'susceptance')
-        
+
         # Set up problem
         problem = pfnet.Problem(net)
-        
+
         problem.add_constraint(pfnet.Constraint('AC power balance', net))
         problem.add_constraint(pfnet.Constraint('HVDC power balance', net))
         problem.add_constraint(pfnet.Constraint('generator active power participation', net))
@@ -239,20 +240,20 @@ class ACPF(PFmethod):
         problem.add_constraint(pfnet.Constraint('switching power factor regulation', net))
         problem.add_constraint(pfnet.Constraint('switching FACTS active power control', net))
         problem.add_constraint(pfnet.Constraint('switching FACTS reactive power control', net))
-        
+
         if vdep_loads:
             problem.add_constraint(pfnet.Constraint('load voltage dependence', net))
 
-        if Q_limits:            
+        if Q_limits:
             problem.add_heuristic(pfnet.Heuristic('PVPQ switching', net))
             problem.add_heuristic(pfnet.Heuristic('switching power factor regulation', net))
 
         problem.analyze()
-        
+
         # Check
         if (problem.J.shape[0] + problem.A.shape[0] != problem.get_num_primal_variables()):
             raise PFmethodError_BadProblem()
-        
+
         # Return
         return problem
 
@@ -281,7 +282,7 @@ class ACPF(PFmethod):
         vdep_loads = params['vdep_loads']
         v_mag_warm_ref = params['v_mag_warm_ref']
         gens_redispatch = params['gens_redispatch']
-        
+
         # Check shunt options
         if shunt_mode not in [self.CONTROL_MODE_LOCKED,
                                self.CONTROL_MODE_FREE,
@@ -315,7 +316,7 @@ class ACPF(PFmethod):
                       'variable',
                       'any',
                       'voltage magnitude')
-        if Q_mode == self.CONTROL_MODE_REG and not Q_limits: 
+        if Q_mode == self.CONTROL_MODE_REG and not Q_limits:
             net.set_flags('bus',
                           'fixed',
                           'v set regulated',
@@ -325,8 +326,8 @@ class ACPF(PFmethod):
                           'bounded',
                           'any',
                           'voltage magnitude')
-            
-        # Genertors 
+
+        # Genertors
         if gens_redispatch:
             for gen in net.generators:
                 if gen.is_slack():
@@ -335,7 +336,7 @@ class ACPF(PFmethod):
                           ['variable', 'bounded'],
                           'redispatchable',
                           'active power')
-        else:  
+        else:
             net.set_flags('generator',
                           'variable',
                           'slack',
@@ -344,12 +345,12 @@ class ACPF(PFmethod):
                       'variable',
                       'regulator',
                       'reactive power')
-        if Q_mode == self.CONTROL_MODE_FREE and Q_limits: 
+        if Q_mode == self.CONTROL_MODE_FREE and Q_limits:
             net.set_flags('generator',
                           'bounded',
                           'regulator',
                           'reactive power')
-            
+
         # Loads
         if vdep_loads:
             for load in net.loads:
@@ -363,18 +364,18 @@ class ACPF(PFmethod):
                       'variable',
                       'any',
                       ['dc power', 'active power', 'reactive power'])
-        if Q_mode == self.CONTROL_MODE_FREE and Q_limits: 
+        if Q_mode == self.CONTROL_MODE_FREE and Q_limits:
             net.set_flags('vsc converter',
                           'bounded',
                           'any',
                           'reactive power')
-            
+
         # CSC HVDC
         net.set_flags('csc converter',
                       'variable',
                       'any',
                       ['dc power', 'active power', 'reactive power'])
-            
+
         # DC buses
         net.set_flags('dc bus',
                       'variable',
@@ -386,15 +387,15 @@ class ACPF(PFmethod):
                       'variable',
                       'any',
                       'all')
-        if Q_mode == self.CONTROL_MODE_FREE and Q_limits:        
+        if Q_mode == self.CONTROL_MODE_FREE and Q_limits:
             net.set_flags('facts',
                           'bounded',
                           'any',
                           'reactive power')
-            
-        # Tap changers 
+
+        # Tap changers
         if tap_mode != self.CONTROL_MODE_LOCKED:
-            net.set_flags('branch', 
+            net.set_flags('branch',
                           'variable',
                           'tap changer - v',
                           'tap ratio')
@@ -403,10 +404,10 @@ class ACPF(PFmethod):
                           'bounded',
                           'tap changer - v',
                           'tap ratio')
-            
+
         # Swtiched shunts
         if shunt_mode != self.CONTROL_MODE_LOCKED:
-            net.set_flags('shunt', 
+            net.set_flags('shunt',
                           'variable',
                           'switching - v',
                           'susceptance')
@@ -415,10 +416,10 @@ class ACPF(PFmethod):
                           'bounded',
                           'switching - v',
                           'susceptance')
-            
+
         # Set up problem
         problem = pfnet.Problem(net)
-        
+
         problem.add_constraint(pfnet.Constraint('AC power balance', net))
         problem.add_constraint(pfnet.Constraint('HVDC power balance', net))
         problem.add_constraint(pfnet.Constraint('generator active power participation', net))
@@ -428,7 +429,7 @@ class ACPF(PFmethod):
         problem.add_constraint(pfnet.Constraint('VSC DC voltage control', net))
         problem.add_constraint(pfnet.Constraint('CSC DC voltage control', net))
         problem.add_constraint(pfnet.Constraint('power factor regulation', net))
-        
+
         if lock_vsc_P_dc:
             problem.add_constraint(pfnet.Constraint('VSC DC power control', net))
         if lock_csc_P_dc:
@@ -448,43 +449,43 @@ class ACPF(PFmethod):
         problem.add_function(pfnet.Function('CSC DC current control', wc/(net.get_num_csc_converters(True)+1.), net))
         problem.add_function(pfnet.Function('FACTS active power control', wc/(net.get_num_facts(True)+1.), net))
         problem.add_function(pfnet.Function('FACTS reactive power control', wc/(net.get_num_facts(True)+1.), net))
-        
+
         if gens_redispatch:
             problem.add_function(pfnet.Function('generation redispatch penalty', wr/(net.get_num_generators(True)+1.), net))
-            
-        if Q_mode == self.CONTROL_MODE_REG and Q_limits: 
+
+        if Q_mode == self.CONTROL_MODE_REG and Q_limits:
             problem.add_constraint(pfnet.Constraint('voltage set point regulation', net))
 
         if net.num_fixed > 0:
             problem.add_constraint(pfnet.Constraint('variable fixing', net))
-            
+
         if tap_mode != self.CONTROL_MODE_LOCKED:
             problem.add_function(pfnet.Function('tap ratio regularization', wc/(net.get_num_tap_changers_v(True)+1.), net))
-            if tap_mode == self.CONTROL_MODE_REG and tap_limits: 
+            if tap_mode == self.CONTROL_MODE_REG and tap_limits:
                 problem.add_constraint(pfnet.Constraint('voltage regulation by transformers', net))
-            
+
         if shunt_mode != self.CONTROL_MODE_LOCKED:
             problem.add_function(pfnet.Function('susceptance regularization', wc/(net.get_num_switched_v_shunts(True)+1.), net))
             if shunt_mode == self.CONTROL_MODE_REG and shunt_limits:
                 problem.add_constraint(pfnet.Constraint('voltage regulation by shunts', net))
-            
+
         if vdep_loads:
             problem.add_constraint(pfnet.Constraint('load voltage dependence', net))
-            
-        if net.num_bounded > 0: 
+
+        if net.num_bounded > 0:
             problem.add_constraint(pfnet.Constraint('variable bounds', net))
-            
+
         # Analyze
         problem.analyze()
-        
+
         # Return
         return problem
-            
+
     def solve(self, net, save_problem=False):
 
         from optalg.opt_solver import OptSolverError, OptTermination, OptCallback
         from optalg.opt_solver import OptSolverAugL, OptSolverIpopt, OptSolverNR, OptSolverINLP
-        
+
         # Parameters
         params = self._parameters
         Q_mode = params['Q_mode']
@@ -532,14 +533,14 @@ class ACPF(PFmethod):
                     self.apply_tran_v_regulation(s)
                 except Exception as e:
                     raise PFmethodError_TranVReg(e)
-            
+
         def c2(s):
             if (s.k != 0 and params['shunt_limits'] and shunt_mode == self.CONTROL_MODE_REG and
                 norm(s.problem.f, np.inf) < 100.*solver_params['nr']['feastol']):
                 try:
                     self.apply_shunt_v_regulation(s)
                 except Exception as e:
-                    raise PFmethodError_ShuntVReg(e)                
+                    raise PFmethodError_ShuntVReg(e)
 
         def c3(s):
             if (s.k >= params['pvpq_start_k'] and params['Q_limits'] and Q_mode == self.CONTROL_MODE_REG):
@@ -552,7 +553,7 @@ class ACPF(PFmethod):
             solver.add_callback(OptCallback(c1))
             solver.add_callback(OptCallback(c2))
             solver.add_callback(OptCallback(c3))
-                
+
         # Termination
         def t1(s):
             if np.min(s.problem.wrapped_problem.network.bus_v_min) < vmin_thresh:
@@ -560,11 +561,11 @@ class ACPF(PFmethod):
             else:
                 return False
         solver.add_termination(OptTermination(t1, 'low voltage'))
-            
+
         # Info printer
         info_printer = self.get_info_printer()
         solver.set_info_printer(info_printer)
-        
+
         # Solve
         update = True
         t0 = time.time()
@@ -576,7 +577,7 @@ class ACPF(PFmethod):
             update = False
             raise e
         finally:
-            
+
             # Update network
             if update:
                 net.set_var_values(solver.get_primal_variables()[:net.num_vars])
@@ -596,7 +597,7 @@ class ACPF(PFmethod):
             self.set_problem(problem if save_problem else None)
             self.set_problem_time(problem_time)
             self.set_network_snapshot(net)
- 
+
     def get_info_printer(self):
 
         # Parameters
@@ -631,9 +632,9 @@ class ACPF(PFmethod):
 
         # Fix constraints
         c = p.find_constraint('variable fixing')
-        A = c.A        
+        A = c.A
         b = c.b
-        
+
         # Rhs
         rhs = np.hstack((np.zeros(p.f.size),np.zeros(p.b.size)))
 
@@ -651,7 +652,7 @@ class ACPF(PFmethod):
             bus = net.get_bus(i)
 
             if bus.is_regulated_by_shunt(True) and not bus.is_slack():
-                
+
                 assert(bus.has_flags('variable','voltage magnitude'))
 
                 for t in range(net.num_periods):
@@ -670,21 +671,21 @@ class ACPF(PFmethod):
 
                             if not reg_shunt.is_in_service():
                                 continue
-                    
+
                             assert(reg_shunt.has_flags('variable','susceptance'))
-                        
+
                             s = x[reg_shunt.index_b[t]]
                             smax = reg_shunt.b_max
                             smin = reg_shunt.b_min
                             assert(smin <= smax)
-                            
+
                             # Fix constr index
                             k = int(np.where(A.col == reg_shunt.index_b[t])[0])
                             i = A.row[k]
-                            
+
                             assert(np.abs(b[i]-x[reg_shunt.index_b[t]]) < eps)
                             assert(A.data[k] == 1.)
-                            
+
                             # Sensitivity
                             assert(rhs[p.f.size+offset+i] == 0.)
                             rhs[p.f.size+offset+i] = dsus
@@ -692,7 +693,7 @@ class ACPF(PFmethod):
                             dv = dx[bus.index_v_mag[t]]
                             dvds = dv/dsus
                             rhs[p.f.size+offset+i] = 0.
-                            
+
                             # Adjustment
                             dv = (vmax+vmin)/2.-v
                             ds = step*dv/dvds if dvds != 0. else 0.
@@ -701,7 +702,7 @@ class ACPF(PFmethod):
                             b[i] = snew
                             if np.abs(snew-s) > eps:
                                 break
-                            
+
         # Update
         solver.func(x)
         p.update_lin()
@@ -709,7 +710,7 @@ class ACPF(PFmethod):
         solver.problem.b = p.b
 
     def apply_tran_v_regulation(self,solver):
-        
+
         # Local variables
         dtap = self._parameters['dtap']
         step = self._parameters['tap_step']
@@ -720,12 +721,12 @@ class ACPF(PFmethod):
 
         # Fix constraints
         c = p.find_constraint('variable fixing')
-        A = c.A        
+        A = c.A
         b = c.b
 
         # Rhs
         rhs = np.hstack((np.zeros(p.f.size),np.zeros(p.b.size)))
-        
+
         # Offset
         offset = 0
         for c in p.constraints:
@@ -740,39 +741,39 @@ class ACPF(PFmethod):
             bus = net.get_bus(i)
 
             if bus.is_regulated_by_tran(True) and not bus.is_slack():
-                
+
                 assert(bus.has_flags('variable','voltage magnitude'))
 
                 for tau in range(net.num_periods):
-                    
+
                     v = x[bus.index_v_mag[tau]]
                     vmax = bus.v_max_reg
                     vmin = bus.v_min_reg
-                    
+
                     assert(len(bus.reg_trans) > 0)
                     assert(vmax > vmin)
-                
+
                     # Violation
                     if v > vmax or v < vmin:
-                        
+
                         for reg_tran in bus.reg_trans:
 
                             if not reg_tran.is_in_service():
                                 continue
-                                                        
+
                             assert(reg_tran.has_flags('variable','tap ratio'))
-                            
+
                             t = x[reg_tran.index_ratio[tau]]
                             tmax = reg_tran.ratio_max
                             tmin = reg_tran.ratio_min
                             assert(tmax >= tmin)
-                            
+
                             # Fix constr index
                             k = int(np.where(A.col == reg_tran.index_ratio[tau])[0])
                             i = A.row[k]
                             assert(np.abs(b[i]-x[reg_tran.index_ratio[tau]]) < eps)
                             assert(A.data[k] == 1.)
-                            
+
                             # Sensitivity
                             assert(rhs[p.f.size+offset+i] == 0.)
                             rhs[p.f.size+offset+i] = dtap
@@ -780,7 +781,7 @@ class ACPF(PFmethod):
                             dv = dx[bus.index_v_mag[tau]]
                             dvdt = dv/dtap
                             rhs[p.f.size+offset+i] = 0.
-                            
+
                             # Adjustment
                             dv = (vmax+vmin)/2.-v
                             dt = step*dv/dvdt if dvdt != 0. else 0.
@@ -791,8 +792,7 @@ class ACPF(PFmethod):
                                 break
 
         # Update
-        solver.func(x)        
+        solver.func(x)
         p.update_lin()
         solver.problem.A = p.A
         solver.problem.b = p.b
-

@@ -1,5 +1,5 @@
-Unreleased
-----------
+Version 1.4.0
+-------------
 * Updated ACPF to treat slack bus voltage mag as variable.
 * ACPF includes CSC constant current control.
 * Added voltage clipping to acpf.
@@ -7,7 +7,7 @@ Unreleased
 * All methods automatically merge buses when creating network copy.
 * Overwrote barrier parameter bound for ACPF with augl.
 * Shunts mode in ACPF.
-* Support for net components being in or out of service.
+* Support for network components being in or out of service.
 * v_mag_warm_ref parameter to ACPF method.
 * Improved ACPF parameters and new options (e.g. gens_redispatch)
 
@@ -18,7 +18,7 @@ Version 1.3.6
 * Made unittests handling of test cases and solution files cross-platform.
 * Made test utils more flexible to be used from outside unittests.
 * Added HVDC, FACTS and vdep-loads to ACPF.
-* Added option for using linearized AC power flow equations in ACPF. 
+* Added option for using linearized AC power flow equations in ACPF.
 * Specified gridopt command-line utility using console entry point.
 * Added command-line utility option for writing network to file.
 

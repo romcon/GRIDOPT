@@ -42,8 +42,14 @@ Error Exceptions
 
 .. autoclass:: gridopt.power_flow.method_error.PFmethodError_BadParams
 
-.. autoclass:: gridopt.power_flow.method_error.PFmethodError_BadOptSolver			      
+.. autoclass:: gridopt.power_flow.method_error.PFmethodError_BadParamValue
+
+.. autoclass:: gridopt.power_flow.method_error.PFmethodError_BadOptSolver
 
 .. autoclass:: gridopt.power_flow.method_error.PFmethodError_ParamNotBool
-			      
+
+.. autoclass:: gridopt.power_flow.method_error.PFmethodError_TranVReg
+
+.. autoclass:: gridopt.power_flow.method_error.PFmethodError_ShuntVReg
+
 .. autoclass:: gridopt.power_flow.method_error.PFmethodError_SolverError
