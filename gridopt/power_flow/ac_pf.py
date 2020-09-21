@@ -481,7 +481,33 @@ class ACPF(PFmethod):
         # Return
         return problem
 
-    def solve(self, net, save_problem=False):
+    def initialize_problem(self, net, update_net):
+        # Parameters
+        params = self._parameters
+        v_min_clip = params['v_min_clip']
+        v_max_clip = params['v_max_clip']
+
+        if not update_net:
+            # Copy network
+            net = net.get_copy(merge_buses=True)
+            self.set_network_snapshot(net)
+
+        # Clipping
+        for bus in net.buses:
+            bus.v_mag = np.minimum(np.maximum(bus.v_mag, v_min_clip), v_max_clip)
+
+        # Problem
+        t0 = time.time()
+        problem = self.create_problem(net)
+        problem_time = time.time()-t0
+        self.set_problem_time(problem_time)
+
+        return problem
+
+    def solve_problem(self, net, problem, save_problem=False, update_net=False):
+        """
+        solve the Optimization problem
+        """
 
         from optalg.opt_solver import OptSolverError, OptTermination, OptCallback
         from optalg.opt_solver import OptSolverAugL, OptSolverIpopt, OptSolverNR, OptSolverINLP
@@ -490,14 +516,10 @@ class ACPF(PFmethod):
         params = self._parameters
         Q_mode = params['Q_mode']
         shunt_mode = params['shunt_mode']
-        shunts_round = params['shunts_round']
         tap_mode = params['tap_mode']
-        taps_round = params['taps_round']
         vmin_thresh = params['vmin_thresh']
         solver_name = params['solver']
         solver_params = params['solver_parameters']
-        v_min_clip = params['v_min_clip']
-        v_max_clip = params['v_max_clip']
 
         # Opt solver
         if solver_name == 'augl':
@@ -512,18 +534,6 @@ class ACPF(PFmethod):
             raise PFmethodError_BadOptSolver()
         solver.set_parameters(solver_params[solver_name])
 
-        # Copy network
-        net = net.get_copy(merge_buses=True)
-        self.set_network_snapshot(net)
-
-        # Clipping
-        for bus in net.buses:
-            bus.v_mag = np.minimum(np.maximum(bus.v_mag, v_min_clip), v_max_clip)
-
-        # Problem
-        t0 = time.time()
-        problem = self.create_problem(net)
-        problem_time = time.time()-t0
 
         # Callbacks
         def c1(s):
@@ -580,11 +590,14 @@ class ACPF(PFmethod):
 
             # Update network
             if update:
-                net.set_var_values(solver.get_primal_variables()[:net.num_vars])
-                net.update_properties()
-                net.clear_sensitivities()
-                if solver_name != 'nr':
-                    problem.store_sensitivities(*solver.get_dual_variables())
+                if update_net and solver.get_status() == 'error':
+                    pass
+                else:
+                    net.set_var_values(solver.get_primal_variables()[:net.num_vars])
+                    net.update_properties()
+                    net.clear_sensitivities()
+                    if solver_name != 'nr':
+                        problem.store_sensitivities(*solver.get_dual_variables())
 
             # Save results
             self.set_solver_name(solver_name)
@@ -595,8 +608,24 @@ class ACPF(PFmethod):
             self.set_solver_primal_variables(solver.get_primal_variables())
             self.set_solver_dual_variables(solver.get_dual_variables())
             self.set_problem(problem if save_problem else None)
-            self.set_problem_time(problem_time)
-            self.set_network_snapshot(net)
+            self.set_network_snapshot(net if not update_net else None)
+
+    def solve(self, net, save_problem=False, update_net=False):
+        """
+        Solve the network
+
+        Parameters
+        -----------
+        net: |Network|
+        save_problem: bool
+        update_net: bool (update network with the results if solved successfully)
+        """
+
+        # Step 1: initialize optimization Problem
+        problem = self.initialize_problem(net, update_net)
+
+        # step 2: Solve the initialized optimization Problem
+        self.solve_problem(net, problem, save_problem, update_net)
 
     def get_info_printer(self):
 
