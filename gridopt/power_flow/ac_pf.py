@@ -481,7 +481,7 @@ class ACPF(PFmethod):
         # Return
         return problem
 
-    def initialize_problem(self, net, update_net):
+    def initialize_problem(self, net, update_net=False):
         # Parameters
         params = self._parameters
         v_min_clip = params['v_min_clip']
@@ -490,7 +490,8 @@ class ACPF(PFmethod):
         if not update_net:
             # Copy network
             net = net.get_copy(merge_buses=True)
-            self.set_network_snapshot(net)
+
+        self.set_network_snapshot(net)
 
         # Clipping
         for bus in net.buses:
@@ -607,7 +608,7 @@ class ACPF(PFmethod):
             self.set_solver_primal_variables(solver.get_primal_variables())
             self.set_solver_dual_variables(solver.get_dual_variables())
             self.set_problem(problem if save_problem else None)
-            self.set_network_snapshot(net if not update_net else None)
+            self.set_network_snapshot(net)
             if solver_name == 'nr':
                 self.set_linsolver(solver.linsolver)
 
