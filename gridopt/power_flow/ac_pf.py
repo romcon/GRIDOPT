@@ -534,7 +534,6 @@ class ACPF(PFmethod):
             raise PFmethodError_BadOptSolver()
         solver.set_parameters(solver_params[solver_name])
 
-
         # Callbacks
         def c1(s):
             if (s.k != 0 and params['tap_limits'] and tap_mode == self.CONTROL_MODE_REG and
@@ -609,6 +608,8 @@ class ACPF(PFmethod):
             self.set_solver_dual_variables(solver.get_dual_variables())
             self.set_problem(problem if save_problem else None)
             self.set_network_snapshot(net if not update_net else None)
+            if solver_name == 'nr':
+                self.set_linsolver(solver.linsolver)
 
     def solve(self, net, save_problem=False, update_net=False):
         """

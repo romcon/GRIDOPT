@@ -26,9 +26,10 @@ class PFmethod:
                         'solver time': 0.,
                         'solver primal variables': None,
                         'solver dual variables': None,
-                        'problem' : None,
-                        'problem time' : 0.,
-                        'network snapshot' : None}
+                        'problem': None,
+                        'problem time': 0.,
+                        'network snapshot': None,
+                        'linsolver': None}
 
     def create_problem(self,net):
         """
@@ -78,6 +79,16 @@ class PFmethod:
         """
 
         self.results['solver name'] = name
+
+    def set_linsolver(self, linsolver):
+        """
+        Set the linsolver object
+
+        Parameters
+        ----------
+        linsolver : object
+        """
+        self.results['linsolver'] = linsolver
 
     def set_solver_status(self, status):
         """
