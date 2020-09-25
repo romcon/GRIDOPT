@@ -491,8 +491,6 @@ class ACPF(PFmethod):
             # Copy network
             net = net.get_copy(merge_buses=True)
 
-        self.set_network_snapshot(net)
-
         # Clipping
         for bus in net.buses:
             bus.v_mag = np.minimum(np.maximum(bus.v_mag, v_min_clip), v_max_clip)
@@ -505,7 +503,7 @@ class ACPF(PFmethod):
 
         return problem
 
-    def solve_problem(self, net, problem, save_problem=False, update_net=False):
+    def solve_problem(self, problem, save_problem=False, update_net=False):
         """
         solve the Optimization problem
         """
@@ -576,6 +574,9 @@ class ACPF(PFmethod):
         info_printer = self.get_info_printer()
         solver.set_info_printer(info_printer)
 
+        # point to network
+        net = problem.network
+
         # Solve
         update = True
         t0 = time.time()
@@ -627,7 +628,7 @@ class ACPF(PFmethod):
         problem = self.initialize_problem(net, update_net)
 
         # step 2: Solve the initialized optimization Problem
-        self.solve_problem(net, problem, save_problem, update_net)
+        self.solve_problem(problem, save_problem, update_net)
 
     def get_info_printer(self):
 
