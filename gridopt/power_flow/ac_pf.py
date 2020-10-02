@@ -503,7 +503,7 @@ class ACPF(PFmethod):
 
         return problem
 
-    def solve_problem(self, problem, save_problem=False, save_linsolver=False, update_net=False):
+    def solve_problem(self, problem, save_problem=False, update_net=False):
         """
         solve the Optimization problem
         """
@@ -610,9 +610,8 @@ class ACPF(PFmethod):
             self.set_solver_dual_variables(solver.get_dual_variables())
             self.set_problem(problem if save_problem else None)
             self.set_network_snapshot(net)
-            self.set_linsolver(solver.linsolver if solver_name == 'nr' and save_linsolver else None)
 
-    def solve(self, net, save_problem=False, save_linsolver=False, update_net=False):
+    def solve(self, net, save_problem=False, update_net=False):
         """
         Solve the network
 
@@ -627,7 +626,7 @@ class ACPF(PFmethod):
         problem = self.initialize_problem(net, update_net)
 
         # step 2: Solve the initialized optimization Problem
-        self.solve_problem(problem, save_problem, save_linsolver, update_net)
+        self.solve_problem(problem, save_problem, update_net)
 
     def get_info_printer(self):
 
