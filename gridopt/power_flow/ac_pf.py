@@ -501,9 +501,9 @@ class ACPF(PFmethod):
         problem_time = time.time()-t0
         self.set_problem_time(problem_time)
 
-        return problem
+        return net, problem
 
-    def solve_problem(self, problem, save_problem=False, update_net=False):
+    def solve_problem(self, net, problem, save_problem=False, update_net=False):
         """
         solve the Optimization problem
         """
@@ -574,9 +574,6 @@ class ACPF(PFmethod):
         info_printer = self.get_info_printer()
         solver.set_info_printer(info_printer)
 
-        # point to network
-        net = problem.network
-
         # Solve
         update = True
         t0 = time.time()
@@ -623,10 +620,10 @@ class ACPF(PFmethod):
         """
 
         # Step 1: initialize optimization Problem
-        problem = self.initialize_problem(net, update_net)
+        net, problem = self.initialize_problem(net, update_net)
 
         # step 2: Solve the initialized optimization Problem
-        self.solve_problem(problem, save_problem, update_net)
+        self.solve_problem(net, problem, save_problem, update_net)
 
     def get_info_printer(self):
 
