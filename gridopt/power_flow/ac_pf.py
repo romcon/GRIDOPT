@@ -54,6 +54,7 @@ class ACPF(PFmethod):
                    'tap_step': 0.5,          # tap ratio acceleration factor (NR only)
                    'shunt_step': 0.5,        # susceptance acceleration factor (NR only)
                    'dtap': 1e-4,             # tap ratio perturbation (NR only)
+                   'load_q_curtail': False,  # flag for allowing load Q to change (OPT only)
                    'dsus': 1e-4}             # susceptance perturbation (NR only)
 
     _parameters_augl = {'feastol' : 1e-4,
@@ -282,6 +283,7 @@ class ACPF(PFmethod):
         vdep_loads = params['vdep_loads']
         v_mag_warm_ref = params['v_mag_warm_ref']
         gens_redispatch = params['gens_redispatch']
+        curtail_load_q = params['load_q_curtail']
 
         # Check shunt options
         if shunt_mode not in [self.CONTROL_MODE_LOCKED,
@@ -329,9 +331,7 @@ class ACPF(PFmethod):
 
         # Genertors
         if gens_redispatch:
-            for gen in net.generators:
-                if gen.is_slack():
-                    gen.redispatchable = True
+            # Assume slack gens (excep renewables) are redispatchable
             net.set_flags('generator',
                           ['variable', 'bounded'],
                           'redispatchable',
@@ -359,6 +359,13 @@ class ACPF(PFmethod):
                                                'variable',
                                                ['active power', 'reactive power'])
 
+        if curtail_load_q:
+            for load in net.loads:
+                load.Q_min = np.minimum(load.Q, 0)
+                load.Q_max = np.maximum(load.Q, 0)
+                net.set_flags_of_component(load,
+                                            ['variable','bounded'],
+                                            'reactive power')
         # VSC HVDC
         net.set_flags('vsc converter',
                       'variable',
