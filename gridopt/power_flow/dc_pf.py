@@ -55,7 +55,8 @@ class DCPF(PFmethod):
 
         # Check
         try:
-            assert(net.num_vars == net.num_buses-1+net.get_num_slack_gens())
+            num_buses = len([b for b in net.buses if b.in_service])
+            assert(net.num_vars == num_buses-1+net.get_num_slack_gens())
         except AssertionError:
             raise PFmethodError_BadProblem()
 
