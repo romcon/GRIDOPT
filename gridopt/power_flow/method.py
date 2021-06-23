@@ -258,7 +258,7 @@ class PFmethod:
         if invalid_params:
             raise PFmethodError_BadParams(invalid_params)
 
-    def set_results(self,results):
+    def set_results(self, results):
         """
         Sets method results.
 
@@ -269,7 +269,7 @@ class PFmethod:
 
         self.results = results
 
-    def solve(self,net):
+    def solve(self, net):
         """
         Solves power flow problem.
 

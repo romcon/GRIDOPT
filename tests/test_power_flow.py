@@ -208,6 +208,118 @@ class TestPowerFlow(unittest.TestCase):
 
                 self.assertRaises(AssertionError, pf.tests.utils.compare_networks, self, r['network snapshot'], r_oos['network snapshot'])
 
+    def test_ACPF_parameters(self):
+
+        acpf = gopt.power_flow.ACPF()
+
+        # Set parameters
+        solvers = ['augl', 'nr', 'inlp', 'ipopt']
+        acpf.set_parameters({
+                            'weight_vmag': 1.1,
+                            'weight_vang': 1.2,
+                            'weight_powers': 1.3,
+                            'weight_controls': 1.4,
+                            'weight_var': 1.5,
+                            'weight_redispatch': 1.6,
+                            'v_min_clip': 0.2,
+                            'v_max_clip': 1.8,
+                            'v_limits': True,
+                            'Q_mode': 'regulating',
+                            'Q_limits': True,
+                            'shunt_mode': 'regulating',
+                            'shunt_limits': True,
+                            'tap_mode': 'regulating',
+                            'tap_limits': True,
+                            'lock_vsc_P_dc': False,
+                            'lock_csc_P_dc': False,
+                            'lock_csc_i_dc': False,
+                            'vdep_loads': True,
+                            'pvpq_start_k': 1,
+                            'vmin_thresh': 0.25,
+                            'v_mag_warm_ref': True,
+                            'gens_redispatch': True,
+                            'tap_step': 0.1,
+                            'shunt_step': 0.1,
+                            'dtap': 1e-6,
+                            'dsus': 1e-6,
+                            'feastol': 1e-2,
+                            'optol': 2e-2,
+                            'maxiter': 2,
+                            'kappa': 1e-2,
+                            'theta_max': 1e-4,
+                            'sigma_init_max': 1e8})
+
+        # Check exception for invalid param
+        self.assertRaises(gopt.power_flow.method_error.PFmethodError_BadParams,
+                          acpf.set_parameters,{'foo' : 'bar'})
+
+        # Get parameters
+        params = acpf.get_parameters()
+
+        # Check that set_parameters worked
+        self.assertEqual(params['weight_vmag'], 1.1)
+        self.assertEqual(params['weight_vang'], 1.2)
+        self.assertEqual(params['weight_powers'], 1.3)
+        self.assertEqual(params['weight_controls'], 1.4)
+        self.assertEqual(params['weight_var'], 1.5)
+        self.assertEqual(params['weight_redispatch'], 1.6)
+        self.assertEqual(params['v_min_clip'], 0.2)
+        self.assertEqual(params['v_max_clip'], 1.8)    
+        self.assertEqual(params['v_limits'], True)
+        self.assertEqual(params['Q_mode'], 'regulating')
+        self.assertEqual(params['Q_limits'], True)
+        self.assertEqual(params['shunt_mode'], 'regulating')
+        self.assertEqual(params['shunt_limits'], True)
+        self.assertEqual(params['tap_mode'], 'regulating')
+        self.assertEqual(params['tap_limits'], True)
+        self.assertEqual(params['lock_vsc_P_dc'], False)
+        self.assertEqual(params['lock_csc_P_dc'], False)
+        self.assertEqual(params['lock_csc_i_dc'], False)
+        self.assertEqual(params['vdep_loads'], True)
+        self.assertEqual(params['pvpq_start_k'], 1)
+        self.assertEqual(params['vmin_thresh'], 0.25)
+        self.assertEqual(params['v_mag_warm_ref'], True)
+        self.assertEqual(params['gens_redispatch'], True)
+        self.assertEqual(params['tap_step'], 0.1)
+        self.assertEqual(params['shunt_step'], 0.1)
+        self.assertEqual(params['dtap'], 1e-6)
+        self.assertEqual(params['dsus'], 1e-6)
+
+        self.assertEqual(params['solver_parameters']['nr']['maxiter'], 2)
+        self.assertEqual(params['solver_parameters']['nr']['feastol'], 1e-2)
+
+        self.assertEqual(params['solver_parameters']['augl']['maxiter'], 2)
+        self.assertEqual(params['solver_parameters']['augl']['feastol'], 1e-2)
+        self.assertEqual(params['solver_parameters']['augl']['optol'], 2e-2)
+        self.assertEqual(params['solver_parameters']['augl']['kappa'], 1e-2)
+        self.assertEqual(params['solver_parameters']['augl']['theta_max'], 1e-4)
+        self.assertEqual(params['solver_parameters']['augl']['sigma_init_max'], 1e8)
+
+        # self.assertEqual(params['solver_parameters']['ipopt']['maxiter'], 3)  # uses max_iter
+
+        self.assertEqual(params['solver_parameters']['inlp']['maxiter'], 2)
+        self.assertEqual(params['solver_parameters']['inlp']['optol'], 2e-2)
+
+
+        # Run short test with each solver to verify it runs
+        case = os.path.join('tests', 'resources', 'cases', 'ieee300.raw')
+        if not os.path.isfile(case):
+            return
+
+        parser = pf.Parser(case)
+        parser.set('output_level', 0)
+        net = parser.parse(case)
+        for sol in solvers:
+            if sol == 'nr':
+                acpf.set_parameters({'gens_redispatch': False, 
+                                     'lock_vsc_P_dc': True, 
+                                     'lock_csc_P_dc': True, 
+                                     'lock_csc_i_dc': True})
+            acpf.set_parameters({'solver': sol, 'quiet': True})
+            self.assertEqual(acpf.get_parameters()['solver'], sol)
+            self.assertRaises(gopt.power_flow.method_error.PFmethodError_SolverError, acpf.solve, net, {'quiet': True})
+            
+
     def test_ACOPF_parameters(self):
 
         acopf = gopt.power_flow.ACOPF()
@@ -545,11 +657,11 @@ class TestPowerFlow(unittest.TestCase):
                         self.assertEqual(len(v_ang_error),counter*(T+1))
 
                     # Show
-                    print("%s\t%s\t%s\t%d\t%s" %(case.split(os.sep)[-1],
-                                                 sol_types[sol],
-                                                 solver,
-                                                 results['solver iterations'],
-                                                 validated))
+                    print("\t%s\t%s\t%s\t%d\t%s" %(case.split(os.sep)[-1],
+                                                   sol_types[sol],
+                                                   solver,
+                                                   results['solver iterations'],
+                                                   validated))
 
     def test_ACOPF_solutions(self):
 
@@ -594,7 +706,7 @@ class TestPowerFlow(unittest.TestCase):
                 x1 = method_ipopt.get_results()['solver primal variables']
                 i1 = method_ipopt.get_results()['solver iterations']
                 p1 = method_ipopt.get_results()['network snapshot'].gen_P_cost
-                print("%s\t%s\t%d" %(case.split(os.sep)[-1],'ipopt',i1))
+                print("\t%s\t%s\t%d" %(case.split(os.sep)[-1],'ipopt',i1))
             except ImportError:
                 has_ipopt = False
 
@@ -609,7 +721,7 @@ class TestPowerFlow(unittest.TestCase):
             x2 = method_inlp.get_results()['solver primal variables']
             i2 = method_inlp.get_results()['solver iterations']
             p2 = method_inlp.get_results()['network snapshot'].gen_P_cost
-            print("%s\t%s\t%d" %(case.split(os.sep)[-1],'inlp',i2))
+            print("\t%s\t%s\t%d" %(case.split(os.sep)[-1],'inlp',i2))
 
             # AUGL
             net.update_properties()
@@ -622,7 +734,7 @@ class TestPowerFlow(unittest.TestCase):
             x3 = method_augl.get_results()['solver primal variables']
             i3 = method_augl.get_results()['solver iterations']
             p3 = method_augl.get_results()['network snapshot'].gen_P_cost
-            print("%s\t%s\t%d" %(case.split(os.sep)[-1],'augl',i3))
+            print("\t%s\t%s\t%d" %(case.split(os.sep)[-1],'augl',i3))
 
             # Checks
             if has_ipopt:
