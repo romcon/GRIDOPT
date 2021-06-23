@@ -1,10 +1,10 @@
-#*****************************************************#
+# *****************************************************#
 # This file is part of GRIDOPT.                       #
 #                                                     #
 # Copyright (c) 2015, Tomas Tinoco De Rubira.         #
 #                                                     #
 # GRIDOPT is released under the BSD 2-clause license. #
-#*****************************************************#
+# *****************************************************#
 
 import os
 import sys
@@ -15,8 +15,8 @@ from setuptools.command.build_py import build_py
 from setuptools.command.bdist_egg import bdist_egg
 from wheel.bdist_wheel import bdist_wheel
 
-exec(open(os.path.join('gridopt', 'version.py')).read())
 
+exec(open(os.path.join('gridopt', 'version.py')).read())
 
 # Custom distribution build commands
 class bdist_wheel_compiled(bdist_wheel):

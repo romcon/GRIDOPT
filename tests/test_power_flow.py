@@ -40,7 +40,9 @@ class TestPowerFlow(unittest.TestCase):
         if not os.path.isfile(case):
             raise unittest.SkipTest('file not available')
 
-        net = pf.Parser(case).parse(case)
+        parser = pf.Parser(case)
+        parser.set('output_level', 0)
+        net = parser.parse(case)
 
         # Default
         method = gopt.power_flow.ACPF()
@@ -169,14 +171,13 @@ class TestPowerFlow(unittest.TestCase):
         self.assertRaises(ValueError, method.solve, net)
 
     def test_ACPF_keep_all(self):
-
-        print('')
-
+        
         for case in utils.test_cases:
 
             if os.path.splitext(case)[1] == '.raw':
 
                 parser = pf.ParserRAW()
+                parser.set('output_level', 0)
                 net = parser.parse(case)
 
                 parser.set('keep_all_out_of_service', True)
@@ -284,7 +285,9 @@ class TestPowerFlow(unittest.TestCase):
             method.set_parameters({'solver' : 'superlu'})
             self.assertTrue('solver_parameters' in method.get_parameters().keys())
 
-            net = pf.Parser(case).parse(case)
+            parser = pf.Parser(case)
+            parser.set('output_level', 0)
+            net = parser.parse(case)
 
             method.solve(net)
 
@@ -300,7 +303,9 @@ class TestPowerFlow(unittest.TestCase):
         if not os.path.isfile(case):
             raise unittest.SkipTest('file not available')
 
-        net = pf.Parser(case).parse(case)
+        parser = pf.Parser(case)
+        parser.set('output_level', 0)
+        net = parser.parse(case)
 
         method = gopt.power_flow.new_method('ACPF')
 
@@ -332,7 +337,9 @@ class TestPowerFlow(unittest.TestCase):
         if not os.path.isfile(case):
             raise unittest.SkipTest('file not available')
 
-        net = pf.Parser(case).parse(case)
+        parser = pf.Parser(case)
+        parser.set('output_level', 0)
+        net = parser.parse(case)
 
         method = gopt.power_flow.new_method('ACPF')
 
@@ -367,7 +374,9 @@ class TestPowerFlow(unittest.TestCase):
 
         for case in utils.test_cases:
 
-            net = pf.Parser(case).parse(case)
+            parser = pf.Parser(case)
+            parser.set('output_level', 0)
+            net = parser.parse(case)
 
             method = gopt.power_flow.new_method('ACPF')
             method.set_parameters(params={'solver': 'nr',
@@ -426,8 +435,12 @@ class TestPowerFlow(unittest.TestCase):
                     method = gopt.power_flow.new_method('ACPF')
                     method.set_parameters(params={'solver': solver})
 
-                    net = pf.Parser(case).parse(case)
-                    netMP = pf.Parser(case).parse(case,T)
+                    parser = pf.Parser(case)
+                    parser.set('output_level', 0)
+                    net = parser.parse(case)
+                    parser = pf.Parser(case)
+                    parser.set('output_level', 0)
+                    netMP = parser.parse(case, T)
 
                     self.assertEqual(net.num_periods,1)
                     self.assertEqual(netMP.num_periods,T)
@@ -558,7 +571,9 @@ class TestPowerFlow(unittest.TestCase):
             if case.split(os.sep)[-1] in skipcases:
                 continue
 
-            net = pf.Parser(case).parse(case)
+            parser = pf.Parser(case)
+            parser.set('output_level', 0)
+            net = parser.parse(case)
 
             # Only small
             if net.num_buses > 3300:
@@ -639,7 +654,9 @@ class TestPowerFlow(unittest.TestCase):
             if case.split(os.sep)[-1] in skipcases:
                 continue
 
-            net = pf.Parser(case).parse(case,T)
+            parser = pf.Parser(case)
+            parser.set('output_level', 0)
+            net = parser.parse(case, T)
 
             for branch in net.branches:
                 if branch.ratingA == 0:
@@ -778,7 +795,9 @@ class TestPowerFlow(unittest.TestCase):
         # Define non-redispatchable gens
         gen_no_rdisp = range(10,20)
 
-        net = pf.Parser(case).parse(case)
+        parser = pf.Parser(case)
+        parser.set('output_level', 0)
+        net = parser.parse(case)
 
         method = gopt.power_flow.new_method('ACPF')
         method.set_parameters(params={'solver': 'augl',
