@@ -26,9 +26,9 @@ class PFmethod:
                         'solver time': 0.,
                         'solver primal variables': None,
                         'solver dual variables': None,
-                        'problem' : None,
-                        'problem time' : 0.,
-                        'network snapshot' : None}
+                        'problem': None,
+                        'problem time': 0.,
+                        'network snapshot': None}
 
     def create_problem(self,net):
         """
