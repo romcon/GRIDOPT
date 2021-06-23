@@ -238,6 +238,7 @@ class TestPowerFlow(unittest.TestCase):
                             'vmin_thresh': 0.25,
                             'v_mag_warm_ref': True,
                             'gens_redispatch': True,
+                            'load_q_curtail': True,
                             'tap_step': 0.1,
                             'shunt_step': 0.1,
                             'dtap': 1e-6,
@@ -280,6 +281,7 @@ class TestPowerFlow(unittest.TestCase):
         self.assertEqual(params['vmin_thresh'], 0.25)
         self.assertEqual(params['v_mag_warm_ref'], True)
         self.assertEqual(params['gens_redispatch'], True)
+        self.assertEqual(params['load_q_curtail'], True)
         self.assertEqual(params['tap_step'], 0.1)
         self.assertEqual(params['shunt_step'], 0.1)
         self.assertEqual(params['dtap'], 1e-6)
@@ -312,6 +314,7 @@ class TestPowerFlow(unittest.TestCase):
         for sol in solvers:
             if sol == 'nr':
                 acpf.set_parameters({'gens_redispatch': False, 
+                                     'load_q_curtail': False,
                                      'lock_vsc_P_dc': True, 
                                      'lock_csc_P_dc': True, 
                                      'lock_csc_i_dc': True})
