@@ -1,6 +1,8 @@
 Verions 1.4.1
 -------------
 * Updated setup.py to use compiled files with `bdist_wheel_compiled` and `bdist_egg_compiled`.
+* Added `load_q_curtail` parameter setting to ACPF that allows for load.Q to deviate.
+* Change `gens_redispatch` as True that forced changing slack to redispatchable.
 
 Version 1.4.0
 -------------
