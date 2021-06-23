@@ -1,3 +1,7 @@
+Verions 1.4.1
+-------------
+* Updated setup.py to use compiled files with `bdist_wheel_compiled` and `bdist_egg_compiled`.
+
 Version 1.4.0
 -------------
 * Updated ACPF to treat slack bus voltage mag as variable.
