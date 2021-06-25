@@ -26,7 +26,7 @@ GRIDOPT is released under the BSD 2-clause license.
 
    Getting Started<start>
    Power Flow Methods<power_flow>
-   Command-Line Utility<script>	      
+   Command-Line Utility<script>
    API Reference<reference>
 
 Indices and tables
@@ -35,4 +35,3 @@ Indices and tables
 * :ref:`genindex`
 * :ref:`modindex`
 * :ref:`search`
-

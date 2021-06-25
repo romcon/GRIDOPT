@@ -1,3 +1,23 @@
+Verions 1.4.1
+-------------
+* Updated setup.py to use compiled files with `bdist_wheel_compiled` and `bdist_egg_compiled`.
+* Added `load_q_curtail` parameter setting to ACPF that allows for load.Q to deviate.
+* Change `gens_redispatch` as True that forced changing slack to redispatchable.
+* Separate ACPF.solve into steps for `initialize_problem` and `solve_problem` in order to reduce computation time with contructing the problem for contingencies or other calculations where the problem construction does not change.
+
+Version 1.4.0
+-------------
+* Updated ACPF to treat slack bus voltage mag as variable.
+* ACPF includes CSC constant current control.
+* Added voltage clipping to acpf.
+* Added gen P participation constr to opt-base acpf (for consistency).
+* All methods automatically merge buses when creating network copy.
+* Overwrote barrier parameter bound for ACPF with augl.
+* Shunts mode in ACPF.
+* Support for network components being in or out of service.
+* v_mag_warm_ref parameter to ACPF method.
+* Improved ACPF parameters and new options (e.g. gens_redispatch)
+
 Version 1.3.6
 -------------
 * Added slack P participation to non-nr acpf for consistency.
@@ -5,7 +25,7 @@ Version 1.3.6
 * Made unittests handling of test cases and solution files cross-platform.
 * Made test utils more flexible to be used from outside unittests.
 * Added HVDC, FACTS and vdep-loads to ACPF.
-* Added option for using linearized AC power flow equations in ACPF. 
+* Added option for using linearized AC power flow equations in ACPF.
 * Specified gridopt command-line utility using console entry point.
 * Added command-line utility option for writing network to file.
 

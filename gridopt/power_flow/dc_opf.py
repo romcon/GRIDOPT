@@ -13,13 +13,14 @@ from .method_error import *
 from .method import PFmethod
 from numpy.linalg import norm
 
+
 class DCOPF(PFmethod):
     """
     DC optimal power flow method.
     """
 
     name = 'DCOPF'
-        
+
     _parameters = {'thermal_limits': False,
                    'renewable_curtailment': False,
                    'solver' : 'iqp'}
@@ -29,14 +30,14 @@ class DCOPF(PFmethod):
     _parameters_augl = {}
 
     _parameters_ipopt = {}
-    
+
     def __init__(self):
 
         from optalg.opt_solver import OptSolverIQP, OptSolverAugL, OptSolverIpopt
 
         # Parent init
         PFmethod.__init__(self)
-        
+
         # Solver parameters
         iqp_params = OptSolverIQP.parameters.copy()
         iqp_params.update(self._parameters_iqp)     # overwrite defaults
@@ -55,14 +56,14 @@ class DCOPF(PFmethod):
     def create_problem(self,net):
 
         import pfnet
-        
+
         # Parameters
         params = self._parameters
         thermal_limits = params['thermal_limits']
-        
+
         # Clear flags
         net.clear_flags()
-        
+
         # Set flags
         net.set_flags('bus',
                       'variable',
@@ -70,7 +71,7 @@ class DCOPF(PFmethod):
                       'voltage angle')
         net.set_flags('generator',
                       ['variable','bounded'],
-                      ['adjustable active power','not on outage'],
+                      'any',
                       'active power')
         net.set_flags('load',
                       ['variable','bounded'],
@@ -83,8 +84,7 @@ class DCOPF(PFmethod):
                           'active power')
 
         try:
-            num_gvar =  len([g for g in net.generators if 
-                             (not g.is_on_outage()) and g.is_P_adjustable()])
+            num_gvar = net.get_num_generators()
             num_cur = net.num_var_generators if params['renewable_curtailment'] else 0
             assert(net.num_bounded == (num_gvar+net.get_num_P_adjust_loads()+num_cur)*net.num_periods)
             assert(net.num_vars == (net.num_buses-net.get_num_slack_buses()+
@@ -92,7 +92,7 @@ class DCOPF(PFmethod):
                                     num_cur)*net.num_periods)
         except AssertionError:
             raise PFmethodError_BadProblem()
-            
+
         # Set up problem
         problem = pfnet.Problem(net)
         problem.add_constraint(pfnet.Constraint('variable bounds',net))
@@ -102,15 +102,15 @@ class DCOPF(PFmethod):
         problem.add_function(pfnet.Function('generation cost',1.,net))
         problem.add_function(pfnet.Function('consumption utility',-1.,net))
         problem.analyze()
-        
+
         # Return
         return problem
-            
+
     def solve(self,net):
 
         from optalg.opt_solver import OptSolverError
         from optalg.opt_solver import OptSolverIQP, OptSolverAugL, OptSolverIpopt
-        
+
         # Parameters
         params = self._parameters
         solver_name = params['solver']
@@ -128,13 +128,13 @@ class DCOPF(PFmethod):
         solver.set_parameters(solver_params[solver_name])
 
         # Copy network
-        net = net.get_copy()
+        net = net.get_copy(merge_buses=True)
 
         # Problem
         t0 = time.time()
         problem = self.create_problem(net)
         problem_time = time.time()-t0
-                
+
         # Solve
         update = True
         t0 = time.time()
