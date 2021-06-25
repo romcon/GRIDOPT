@@ -901,6 +901,73 @@ class TestPowerFlow(unittest.TestCase):
                         self.assertEqual(load.sens_P_u_bound[t],mu2[load.index_P[t]])
                         self.assertEqual(load.sens_P_l_bound[t],pi2[load.index_P[t]])
 
+    def test_ACPF_initialize_problem(self):
+
+        import time 
+
+        case = os.path.join('tests', 'resources', 'cases', 'ieee25.raw')
+        if not os.path.isfile(case):
+            raise unittest.SkipTest('file not available')
+
+        parser = pf.Parser(case)
+        parser.set('output_level', 0)
+        net = parser.parse(case)
+
+        # Define some contingencies
+        contingencies = []
+        for gen in net.generators:
+            if not gen.is_slack():
+                gc = pf.Contingency()
+                gc.name = gen.name
+                gc.add_generator_outage(gen)
+                contingencies.append(gc)
+
+        acpf = gopt.power_flow.ACPF()
+        acpf.set_parameters({'solver': 'nr', 'quiet': True})
+
+        # Check consistent for base case solves
+        unet, problem = acpf.initialize_problem(net)
+        self.assertTrue(isinstance(unet, pf.Network))
+        self.assertTrue(isinstance(problem, pf.Problem))
+        acpf.solve_problem(unet, problem, save_problem=True)
+        result_steps = acpf.get_results()
+        self.assertEqual(problem, result_steps['problem'])
+        self.assertLess(np.linalg.norm(
+            result_steps['network snapshot'].get_var_values() - problem.x), 1e-6)
+        self.assertLess(np.linalg.norm(
+            result_steps['network snapshot'].get_var_values() - unet.get_var_values()), 1e-6)
+        self.assertLess(np.linalg.norm(
+            result_steps['network snapshot'].get_var_values() - result_steps['solver primal variables']), 1e-6)
+
+        acpf.solve(net, save_problem=True)
+        result_orig = acpf.get_results()
+        acpf.update_network(net)
+        self.assertTrue(isinstance(result_orig['problem'], pf.Problem))
+        self.assertNotEqual(result_orig['problem'], result_steps['problem'])
+        self.assertLess(np.linalg.norm(
+            result_orig['network snapshot'].get_var_values() - result_orig['solver primal variables']), 1e-6)
+        self.assertLess(np.linalg.norm(
+            result_orig['solver primal variables'] - result_steps['solver primal variables']), 1e-6)
+
+        # Check solve for contingencies are consistent
+        for cont in contingencies:
+            cont.apply(net)
+            unet, problem = acpf.initialize_problem(net)
+            acpf.solve_problem(unet, problem, save_problem=True)
+            result_steps = acpf.get_results()
+            xsteps = result_steps['solver primal variables']
+            self.assertTrue(isinstance(result_steps['problem'], pf.Problem))
+            self.assertLess(np.linalg.norm(xsteps - problem.x), 1e-6)
+
+            acpf.solve(net, save_problem=True)
+            result_orig = acpf.get_results()
+            xorig = result_orig['solver primal variables']
+            self.assertTrue(isinstance(result_orig['problem'], pf.Problem))
+            self.assertLess(np.linalg.norm(xorig - result_orig['problem'].x), 1e-6)
+
+            self.assertLess(np.linalg.norm(xorig - xsteps), 1e-6)
+            cont.clear(net)
+
     def test_ACPF_with_redispatch(self):
 
         case = os.path.join('tests', 'resources', 'cases', 'ieee25.raw')
@@ -916,9 +983,10 @@ class TestPowerFlow(unittest.TestCase):
 
         method = gopt.power_flow.new_method('ACPF')
         method.set_parameters(params={'solver': 'augl',
-                                    'gens_redispatch': True,
-                                    'weight_redispatch': 1e0,
-                                    'quiet': True})
+                                      'gens_redispatch': True,
+                                      'weight_redispatch': 1e0,
+                                      'Q_limits': False,
+                                      'quiet': True})
         method.solve(net)
 
         # Network with no redispatchable generator other than slack
