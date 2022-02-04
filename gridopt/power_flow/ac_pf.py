@@ -213,6 +213,14 @@ class ACPF(PFmethod):
                           ['variable', 'fixed'],
                           'tap changer - v',
                           'tap ratio')
+            net.set_flags('branch',
+                          'variable',
+                          'tap changer - Q',
+                          'tap ratio')
+            net.set_flags('branch',
+                          'variable',
+                          'phase shifter',
+                          'phase shift')
 
         # Switched shunts
         if shunt_mode != self.CONTROL_MODE_LOCKED:
@@ -248,6 +256,12 @@ class ACPF(PFmethod):
         if Q_limits:
             problem.add_heuristic(pfnet.Heuristic('PVPQ switching', net))
             problem.add_heuristic(pfnet.Heuristic('switching power factor regulation', net))
+
+        if tap_mode != self.CONTROL_MODE_LOCKED:
+            problem.add_constraint(pfnet.Constraint('switching transformer q regulation', net))
+            problem.add_constraint(pfnet.Constraint('switching transformer p regulation', net))
+            problem.add_heuristic(pfnet.Heuristic('switching transformer q regulation', net))
+            problem.add_heuristic(pfnet.Heuristic('switching transformer p regulation', net))
 
         problem.analyze()
 
