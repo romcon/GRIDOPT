@@ -583,11 +583,11 @@ class ACPF(PFmethod):
                         bus_v = s.get_primal_variables()[lod.bus.index_v_mag]
                         if bus_v <= vmin_to_zip:
                             # Move cp&ci to cg
-                            lod.comp_cg = lod.comp_cp * bus_v ** 2 + lod.comp_ci * bus_v + lod.comp_cg
+                            lod.comp_cg = lod.comp_cp + lod.comp_ci + lod.comp_cg
                             lod.comp_cp = 0.0
                             lod.comp_ci = 0.0
                             # Move cq&cj to cb
-                            lod.comp_cb = lod.comp_cb - lod.comp_cq * bus_v ** 2 - lod.comp_cj * bus_v
+                            lod.comp_cb = lod.comp_cb - lod.comp_cq - lod.comp_cj
                             lod.comp_cq = 0.0
                             lod.comp_cj = 0.0
 
