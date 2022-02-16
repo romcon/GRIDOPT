@@ -420,11 +420,27 @@ class ACPF(PFmethod):
                           'variable',
                           'tap changer - v',
                           'tap ratio')
-        if tap_mode == self.CONTROL_MODE_FREE and tap_limits:
             net.set_flags('branch',
-                          'bounded',
-                          'tap changer - v',
+                          'variable',
+                          'tap changer - Q',
                           'tap ratio')
+            net.set_flags('branch',
+                          'variable',
+                          'phase shifter',
+                          'phase shift')
+            if tap_limits:
+                net.set_flags('branch',
+                            'bounded',
+                            'tap changer - v',
+                            'tap ratio')
+                net.set_flags('branch',
+                            'bounded',
+                            'tap changer - Q',
+                            'tap ratio')
+                net.set_flags('branch',
+                            'bounded',
+                            'phase shifter',
+                            'phase shift')
 
         # Swtiched shunts
         if shunt_mode != self.CONTROL_MODE_LOCKED:
@@ -481,8 +497,11 @@ class ACPF(PFmethod):
             problem.add_constraint(pfnet.Constraint('variable fixing', net))
 
         if tap_mode != self.CONTROL_MODE_LOCKED:
-            problem.add_function(pfnet.Function('tap ratio regularization', wc/(net.get_num_tap_changers_v(True)+1.), net))
+            problem.add_function(pfnet.Function('tap ratio regularization', wc/(net.get_num_tap_changers(True)+1.), net))
+            problem.add_function(pfnet.Function('phase shift regularization', wc/(net.get_num_phase_shifters(True)+1.), net))
             if tap_mode == self.CONTROL_MODE_REG and tap_limits:
+                problem.add_function(pfnet.Function('transformer Q regularization', wc/(net.get_num_tap_changers_Q(True)+1.), net))
+                problem.add_function(pfnet.Function('transformer P regularization', wc/(net.get_num_phase_shifters(True)+1.), net))
                 problem.add_constraint(pfnet.Constraint('voltage regulation by transformers', net))
 
         if shunt_mode != self.CONTROL_MODE_LOCKED:
