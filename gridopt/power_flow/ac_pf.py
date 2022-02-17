@@ -414,7 +414,7 @@ class ACPF(PFmethod):
                           'any',
                           'reactive power')
 
-        # Tap changers
+        # Trans mode (tap_mode include phase_shifter mode for now)
         if tap_mode != self.CONTROL_MODE_LOCKED:
             net.set_flags('branch',
                           'variable',
@@ -428,6 +428,7 @@ class ACPF(PFmethod):
                           'variable',
                           'phase shifter',
                           'phase shift')
+            # Trans reg limit (tap limits include phase_shifter limits for now)
             if tap_limits:
                 net.set_flags('branch',
                             'bounded',
@@ -441,6 +442,11 @@ class ACPF(PFmethod):
                             'bounded',
                             'phase shifter',
                             'phase shift')
+                if net.get_num_asymmetric_phase_shifters() > 0:
+                    net.set_flags('branch',
+                                ['variable', 'bounded'],
+                                'asymmetric phase shifter',
+                                'ratio')
 
         # Swtiched shunts
         if shunt_mode != self.CONTROL_MODE_LOCKED:
@@ -503,6 +509,8 @@ class ACPF(PFmethod):
                 problem.add_function(pfnet.Function('transformer Q regularization', wc/(net.get_num_tap_changers_Q(True)+1.), net))
                 problem.add_function(pfnet.Function('transformer P regularization', wc/(net.get_num_phase_shifters(True)+1.), net))
                 problem.add_constraint(pfnet.Constraint('voltage regulation by transformers', net))
+                if net.get_num_asymmetric_phase_shifters() > 0:
+                    problem.add_constraint(pfnet.Constraint('asymmetric transformer equations', net))
 
         if shunt_mode != self.CONTROL_MODE_LOCKED:
             problem.add_function(pfnet.Function('susceptance regularization', wc/(net.get_num_switched_v_shunts(True)+1.), net))
