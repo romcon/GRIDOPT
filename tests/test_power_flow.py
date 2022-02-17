@@ -18,6 +18,7 @@ from numpy.linalg import norm
 import optalg
 import pfnet as pf
 import gridopt as gopt
+import datamodel as datamodel
 
 
 class TestPowerFlow(unittest.TestCase):
@@ -1030,6 +1031,273 @@ class TestPowerFlow(unittest.TestCase):
         for gen in bus.generators:
             if gen.is_slack():
                 self.assertTrue(gen.is_redispatchable())
+
+    def test_ACPF_with_phase_shifter_P_mode(self):
+        self.run_test_ACPF_with_phase_shifter_P_mode(method_name='nr')
+        self.run_test_ACPF_with_phase_shifter_P_mode(method_name='opt')
+    
+    def run_test_ACPF_with_phase_shifter_P_mode(self, method_name='nr'):
+
+        case = os.path.join('tests', 'resources', 'cases', 'ieee25_mw.raw')
+
+        if not os.path.isfile(case):
+            raise unittest.SkipTest('file not available, skip testing {} with phase shifter Pmode'.format(method_name.upper()))
+
+        dm = datamodel.DataModel()
+        net = dm.parse(case,
+                       0,
+                       keep_all_out_of_service=True,
+                       round_tap_ratios=0,
+                       output_level=0,
+                       round_switched_shunts=0)
+
+        # Network
+        self.assertEqual(net.num_buses, 25)
+        self.assertEqual(net.get_num_phase_shifters(), 2)
+        self.assertEqual(net.get_num_tap_changers_Q(), 0)
+        self.assertEqual(net.get_num_tap_changers_v(), 4)
+
+        for br in net.branches:
+            if not br.is_line():
+                self.assertTrue(br.is_in_service())
+                if br.is_phase_shifter():
+                    self.assertTrue(br.P_max > br.P_min)
+                    self.assertTrue(br.phase_max > br.phase_min)
+                    self.assertTrue(br.is_symmetric_phase_shifter())
+                    self.assertFalse(br.is_asymmetric_phase_shifter())
+
+        # Initial state
+        iters = 0
+        if 'nr' in method_name.lower():
+            settings = {'solver': 'nr',
+                        'shunt_mode': 'locked',
+                        'tap_mode': 'regulating',
+                        'maxiter': iters,
+                        'feastol': 1e-4,
+                        'lock_csc_P_dc': True,
+                        'lock_vsc_P_dc': True,
+                        'lock_csc_i_dc': True,
+                        'Q_limits': True,
+                        'quiet': True,
+                        'v_max_clip': 1.8,
+                        'v_min_clip': 0.5,
+                        'acc_factor': 0.5}
+        else:
+            settings = {'solver': 'augl',
+                        'shunt_mode': 'regulating',
+                        'shunt_limits': True,
+                        'tap_mode': 'regulating',
+                        'tap_limits': True,
+                        'Q_limits': True,
+                        'Q_mode': 'regulating',
+                        'v_mag_warm_ref': False,
+                        'maxiter': iters,
+                        'feastol': 1e-5,
+                        'weight_vmag': 1e0,
+                        'weight_vang': 1e-3,
+                        'weight_powers': 1e0,
+                        'weight_var': 1e-5,
+                        'weight_controls': 1e0,
+                        'v_limits': True,
+                        'quiet': True,
+                        'lock_csc_P_dc': True,
+                        'lock_vsc_P_dc': True,
+                        'lock_csc_i_dc': True,
+                        }
+        method = gopt.power_flow.ACPF()
+        method.set_parameters(settings)
+
+        # Check initial controlled P flow
+        try:
+            method.solve(net, save_problem=True)
+        except Exception as e:
+            if isinstance(e.args[0], optalg.opt_solver.OptSolverError_MaxIters):
+                pass
+            else:
+                raise e
+
+        method.update_network(net)
+        result = method.get_results()
+
+        shifters = [br for br in net.branches if br.is_phase_shifter()]
+        for tr in shifters:
+            self.assertTrue(tr.phase > tr.phase_min \
+                            and tr.phase < tr.phase_max)
+            if tr.bus_k.number == 110:
+                self.assertGreater(tr.P_km, tr.P_max)
+            else:
+                self.assertLess(tr.P_km, tr.P_min)
+
+        # Solved state
+        settings.update({'maxiter': 300})
+        method = gopt.power_flow.ACPF()
+        method.set_parameters(settings)
+        method.solve(net, save_problem=True)
+        method.update_network(net)
+        result = method.get_results()
+        self.assertTrue(result['solver status'] == 'solved')
+
+        for tr in shifters:
+            self.assertTrue(tr.phase >= tr.phase_min \
+                            and tr.phase <= tr.phase_max)
+            self.assertTrue(tr.P_km >= tr.P_min \
+                            and tr.P_km <= tr.P_max)
+
+    def test_ACPF_with_tap_changer_Q_mode(self):
+        self.run_test_ACPF_with_tap_changer_Q_mode(method_name='nr')
+        self.run_test_ACPF_with_tap_changer_Q_mode(method_name='opt')
+    
+    def run_test_ACPF_with_tap_changer_Q_mode(self, method_name='nr'):
+
+        case1 = os.path.join('tests', 'resources', 'cases', 'ieee25_mvar_in.raw')
+        case2 = os.path.join('tests', 'resources', 'cases', 'ieee25_mvar_out.raw')
+        case3 = os.path.join('tests', 'resources', 'cases', 'ieee25_mvar_out_limit.raw')
+
+        if not os.path.isfile(case1):
+            raise unittest.SkipTest('file not available, skip testing tap changer Qmode in {}'.format(method_name.upper()))
+        if not os.path.isfile(case2):
+            raise unittest.SkipTest('file not available, skip testing tap changer Qmode out bounds in {}'.format(method_name.upper()))
+        if not os.path.isfile(case3):
+            raise unittest.SkipTest('file not available, skip testing tap changer Qmode out bounds with violations in {}'.format(method_name.upper()))
+
+        dm1 = datamodel.DataModel()
+        net1 = dm1.parse(case1,
+                       0,
+                       keep_all_out_of_service=True,
+                       round_tap_ratios=0,
+                       output_level=0,
+                       round_switched_shunts=0)
+        dm2 = datamodel.DataModel()
+        net2 = dm2.parse(case2,
+                       0,
+                       keep_all_out_of_service=True,
+                       round_tap_ratios=0,
+                       output_level=0,
+                       round_switched_shunts=0)
+        dm3 = datamodel.DataModel()
+        net3 = dm3.parse(case3,
+                       0,
+                       keep_all_out_of_service=True,
+                       round_tap_ratios=0,
+                       output_level=0,
+                       round_switched_shunts=0)
+
+        # Network
+        for net in [net1, net2, net3]:
+            self.assertEqual(net1.num_buses, 25)
+            self.assertEqual(net1.get_num_tap_changers_Q(), 2)
+
+            for br in net.branches:
+                if not br.is_line():
+                    self.assertTrue(br.is_in_service())
+                    self.assertTrue(br.is_tap_changer())
+                    if br.is_tap_changer_Q():
+                        self.assertTrue(br.Q_max > br.Q_min)
+                        self.assertTrue(br.ratio_max > br.ratio_min)
+
+        # Initial state
+        iters = 0
+        if 'nr' in method_name.lower():
+            settings = {'solver': 'nr',
+                        'shunt_mode': 'locked',
+                        'tap_mode': 'regulating',
+                        'maxiter': iters,
+                        'feastol': 1e-4,
+                        'lock_csc_P_dc': True,
+                        'lock_vsc_P_dc': True,
+                        'lock_csc_i_dc': True,
+                        'Q_limits': True,
+                        'quiet': True,
+                        'v_max_clip': 1.8,
+                        'v_min_clip': 0.5,
+                        'acc_factor': 0.5}
+        else:
+            settings = {'solver': 'augl',
+                        'shunt_mode': 'regulating',
+                        'shunt_limits': True,
+                        'tap_mode': 'regulating',
+                        'tap_limits': True,
+                        'Q_limits': True,
+                        'Q_mode': 'regulating',
+                        'v_mag_warm_ref': False,
+                        'maxiter': iters,
+                        'feastol': 1e-5,
+                        'weight_vmag': 1e0,
+                        'weight_vang': 1e-3,
+                        'weight_powers': 1e0,
+                        'weight_var': 1e-5,
+                        'weight_controls': 1e0,
+                        'v_limits': True,
+                        'kappa': 1e-6,
+                        'lam_reg': 1e2,
+                        'quiet': True,
+                        'lock_csc_P_dc': True,
+                        'lock_vsc_P_dc': True,
+                        'lock_csc_i_dc': True,
+                        }
+        method = gopt.power_flow.ACPF()
+        method.set_parameters(settings)
+
+        # Check initial controlled Q flow
+        try:
+            method.solve(net1, save_problem=True)
+        except Exception as e:
+            if isinstance(e.args[0], optalg.opt_solver.OptSolverError_MaxIters):
+                pass
+            else:
+                raise e
+
+        method.update_network(net1)
+        result = method.get_results()
+
+        taps = [br for br in net1.branches if br.is_tap_changer_Q()]
+        for tr in taps:
+            self.assertTrue(tr.ratio > tr.ratio_min \
+                            and tr.ratio < tr.ratio_max)
+            self.assertTrue(tr.Q_km >= tr.Q_min \
+                            and tr.Q_km <= tr.Q_max)
+
+        for net in [net2, net3]:
+            try:
+                method.solve(net, save_problem=True)
+            except Exception as e:
+                if isinstance(e.args[0], optalg.opt_solver.OptSolverError_MaxIters):
+                    pass
+                else:
+                    raise e
+            method.update_network(net)
+            result = method.get_results()
+
+            taps = [br for br in net.branches if br.is_tap_changer_Q()]
+            for tr in taps:
+                self.assertTrue(tr.ratio > tr.ratio_min \
+                                and tr.ratio < tr.ratio_max)
+                if tr.bus_k.number == 110:
+                    self.assertLess(tr.Q_km, tr.Q_min)
+                else:
+                    self.assertGreater(tr.Q_km, tr.Q_max)
+
+        # Solved state
+        settings.update({'maxiter': 300})
+        method = gopt.power_flow.ACPF()
+        method.set_parameters(settings)
+
+        for i, net in enumerate([net1, net2, net3]):
+            method.solve(net, save_problem=True)
+            method.update_network(net)
+            result = method.get_results()
+            self.assertTrue(result['solver status'] == 'solved')
+
+            taps = [br for br in net.branches if br.is_tap_changer_Q()]
+            for tr in taps:
+                self.assertGreaterEqual(tr.ratio, tr.ratio_min)
+                self.assertLessEqual(tr.Q_km, tr.Q_max)
+                if i == 2 and tr.bus_k.number == 110:
+                    self.assertLess(tr.Q_km, tr.Q_min)
+                    self.assertLessEqual(abs(tr.ratio - tr.ratio_max), 1e-6)
+                else:
+                    self.assertGreaterEqual(tr.Q_km, tr.Q_min)
+                    self.assertLessEqual(tr.ratio, tr.ratio_max)
 
     def tearDown(self):
 
