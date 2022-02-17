@@ -1,3 +1,10 @@
+Unreleased
+----------
+* Added transformer P, Q control constraints and heuristics in NR.
+* Added transformer P, Q control functions in Opt-based ACPF.
+* Added phase shift varaibles for phase shifters.
+* Added asymmetric transformer equation on ratio and phase angle in Opt-based.
+
 Verions 1.4.1
 -------------
 * Updated setup.py to use compiled files with `bdist_wheel_compiled` and `bdist_egg_compiled`.
