@@ -47,15 +47,17 @@ class ACPF(PFmethod):
                    'pvpq_start_k': 0,        # start iteration number for PVPQ switching heuristics
                    'vmin_thresh': 0.1,       # minimum voltage magnitude threshold
                    'gens_redispatch': False, # flag for allowing active power redispatch
-                   'shunts_round': True,     # flag for rounding discrete switched shunt susceptances (not supported yet)
+                #    'shunts_round': True,     # flag for rounding discrete switched shunt susceptances (not supported yet)
                    'taps_round': True,       # flag for rounding discrete transformer tap ratios (not supported yet)
                    'v_mag_warm_ref': False,  # flag for using current v_mag as reference in v_mag regularization
                    'solver': 'nr',           # OPTALG optimization solver: augl, ipopt, nr, inlp
                    'tap_step': 0.5,          # tap ratio acceleration factor (NR only)
                    'shunt_step': 0.5,        # susceptance acceleration factor (NR only)
                    'dtap': 1e-4,             # tap ratio perturbation (NR only)
-                   'load_q_curtail': False,  # flag for allowing load Q to change (OPT only)
-                   'dsus': 1e-4}             # susceptance perturbation (NR only)
+                   'y_correction': True,     # admittance correction (NR only)
+                   'dsus': 1e-4,             # susceptance perturbation (NR only)
+                   'load_q_curtail': False,  # flag for allowing load Q to change (Opt only)
+                   }
 
     _parameters_augl = {'feastol' : 1e-4,
                         'optol' : 1e0,
@@ -122,17 +124,18 @@ class ACPF(PFmethod):
         lock_csc_i_dc = params['lock_csc_i_dc']
         vdep_loads = params['vdep_loads']
         gens_redispatch = params['gens_redispatch']
+        y_correction = params['y_correction']
 
         # Check shunt options
         if shunt_mode not in [self.CONTROL_MODE_LOCKED,
-                               self.CONTROL_MODE_REG]:
+                              self.CONTROL_MODE_REG]:
             raise ValueError('invalid shunts mode')
         if shunt_mode == self.CONTROL_MODE_REG and not shunt_limits:
             raise ValueError('unsupported shunts configuration')
 
         # Check tap options
         if tap_mode not in [self.CONTROL_MODE_LOCKED,
-                               self.CONTROL_MODE_REG]:
+                            self.CONTROL_MODE_REG]:
             raise ValueError('invalid taps mode')
         if tap_mode == self.CONTROL_MODE_REG and not tap_limits:
             raise ValueError('unsupported taps configuration')
@@ -248,6 +251,9 @@ class ACPF(PFmethod):
         if Q_limits:
             problem.add_heuristic(pfnet.Heuristic('PVPQ switching', net))
             problem.add_heuristic(pfnet.Heuristic('switching power factor regulation', net))
+
+        if y_correction and tap_mode != self.CONTROL_MODE_LOCKED:
+            problem.add_heuristic(pfnet.Heuristic('admittance correction update', net))
 
         problem.analyze()
 
@@ -548,7 +554,7 @@ class ACPF(PFmethod):
                     self.apply_tran_v_regulation(s)
                 except Exception as e:
                     raise PFmethodError_TranVReg(e)
-
+    
         def c2(s):
             if (s.k != 0 and params['shunt_limits'] and shunt_mode == self.CONTROL_MODE_REG and
                 norm(s.problem.f, np.inf) < 100.*solver_params['nr']['feastol']):
@@ -564,10 +570,20 @@ class ACPF(PFmethod):
                 s.problem.A = prob.A
                 s.problem.b = prob.b
 
+        def c4(s):
+            if (params['y_correction']):
+                prob = s.problem.wrapped_problem
+                prob.apply_heuristics(s.x)
+                s.func(s.x)
+                prob.update_lin()
+                s.problem.J = prob.J
+                s.problem.f = prob.f
+
         if solver_name == 'nr':
             solver.add_callback(OptCallback(c1))
             solver.add_callback(OptCallback(c2))
             solver.add_callback(OptCallback(c3))
+            solver.add_callback(OptCallback(c4))
 
         # Termination
         def t1(s):
@@ -777,7 +793,6 @@ class ACPF(PFmethod):
             if bus.is_regulated_by_tran(True) and not bus.is_slack():
 
                 assert(bus.has_flags('variable','voltage magnitude'))
-
                 for tau in range(net.num_periods):
 
                     v = x[bus.index_v_mag[tau]]

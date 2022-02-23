@@ -4,6 +4,7 @@ Verions 1.4.1
 * Added `load_q_curtail` parameter setting to ACPF that allows for load.Q to deviate.
 * Change `gens_redispatch` as True that forced changing slack to redispatchable.
 * Separate ACPF.solve into steps for `initialize_problem` and `solve_problem` in order to reduce computation time with contructing the problem for contingencies or other calculations where the problem construction does not change.
+* Adding admittance correction parameter `y_correction` and callback to ACPF Newton-Raphson only.
 
 Version 1.4.0
 -------------

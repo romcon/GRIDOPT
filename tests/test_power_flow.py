@@ -54,6 +54,7 @@ class TestPowerFlow(unittest.TestCase):
         self.assertEqual(method._parameters['Q_mode'], 'regulating')
         self.assertEqual(method._parameters['tap_mode'], 'locked')
         self.assertEqual(method._parameters['shunt_mode'], 'locked')
+        self.assertTrue(method._parameters['y_correction'])
         method.solve(net)
         self.assertEqual(method.get_results()['solver status'], 'solved')
 
@@ -170,6 +171,14 @@ class TestPowerFlow(unittest.TestCase):
                                'tap_limits': True})
         self.assertRaises(ValueError, method.solve, net)
 
+        # Impedance correction
+        method = gopt.power_flow.ACPF()
+        method.set_parameters({'quiet': True,
+                               'solver': 'nr',
+                               'y_correction': False})
+        method.solve(net)
+        self.assertEqual(method.get_results()['solver status'], 'solved')
+
     def test_ACPF_keep_all(self):
         
         for case in utils.test_cases:
@@ -230,6 +239,7 @@ class TestPowerFlow(unittest.TestCase):
                             'shunt_limits': True,
                             'tap_mode': 'regulating',
                             'tap_limits': True,
+                            'y_correction': False,
                             'lock_vsc_P_dc': False,
                             'lock_csc_P_dc': False,
                             'lock_csc_i_dc': False,
@@ -273,6 +283,7 @@ class TestPowerFlow(unittest.TestCase):
         self.assertEqual(params['shunt_limits'], True)
         self.assertEqual(params['tap_mode'], 'regulating')
         self.assertEqual(params['tap_limits'], True)
+        self.assertEqual(params['y_correction'], False)
         self.assertEqual(params['lock_vsc_P_dc'], False)
         self.assertEqual(params['lock_csc_P_dc'], False)
         self.assertEqual(params['lock_csc_i_dc'], False)
@@ -322,7 +333,6 @@ class TestPowerFlow(unittest.TestCase):
             self.assertEqual(acpf.get_parameters()['solver'], sol)
             self.assertRaises(gopt.power_flow.method_error.PFmethodError_SolverError, acpf.solve, net, {'quiet': True})
             
-
     def test_ACOPF_parameters(self):
 
         acopf = gopt.power_flow.ACOPF()
@@ -693,6 +703,8 @@ class TestPowerFlow(unittest.TestCase):
             # Only small
             if net.num_buses > 3300:
                 continue
+
+            print(case)
 
             self.assertEqual(net.num_periods,1)
 
