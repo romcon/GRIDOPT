@@ -22,6 +22,7 @@ class ACPF(PFmethod):
     CONTROL_MODE_LOCKED = 'locked'
     CONTROL_MODE_FREE = 'free'
     CONTROL_MODE_REG = 'regulating'
+    CONTROL_MODE_DISC = 'discrete'
 
     name = 'ACPF'
 
@@ -47,8 +48,8 @@ class ACPF(PFmethod):
                    'pvpq_start_k': 0,        # start iteration number for PVPQ switching heuristics
                    'vmin_thresh': 0.1,       # minimum voltage magnitude threshold
                    'gens_redispatch': False, # flag for allowing active power redispatch
-                #    'shunts_round': True,     # flag for rounding discrete switched shunt susceptances (not supported yet)
-                   'taps_round': True,       # flag for rounding discrete transformer tap ratios (not supported yet)
+                #    'shunts_round': False,     # flag for rounding discrete switched shunt susceptances (not supported yet)
+                   'taps_round': False,      # flag for rounding discrete transformer tap ratios (NR only)
                    'v_mag_warm_ref': False,  # flag for using current v_mag as reference in v_mag regularization
                    'solver': 'nr',           # OPTALG optimization solver: augl, ipopt, nr, inlp
                    'tap_step': 0.5,          # tap ratio acceleration factor (NR only)
@@ -548,14 +549,18 @@ class ACPF(PFmethod):
 
         # Callbacks
         def c1(s):
+            """Apply Transformer Voltage Regulation"""
             if (s.k != 0 and params['tap_limits'] and tap_mode == self.CONTROL_MODE_REG and
                 norm(s.problem.f, np.inf) < 100.*solver_params['nr']['feastol']):
                 try:
                     self.apply_tran_v_regulation(s)
+                    if params['taps_round']:
+                        self.apply_tran_tap_rounding(s)
                 except Exception as e:
                     raise PFmethodError_TranVReg(e)
-    
+                
         def c2(s):
+            """Apply Shunt Voltage Regulation"""
             if (s.k != 0 and params['shunt_limits'] and shunt_mode == self.CONTROL_MODE_REG and
                 norm(s.problem.f, np.inf) < 100.*solver_params['nr']['feastol']):
                 try:
@@ -564,6 +569,7 @@ class ACPF(PFmethod):
                     raise PFmethodError_ShuntVReg(e)
 
         def c3(s):
+            """PV-PQ start at given iteration"""
             if (s.k >= params['pvpq_start_k'] and params['Q_limits'] and Q_mode == self.CONTROL_MODE_REG):
                 prob = s.problem.wrapped_problem
                 prob.apply_heuristics(s.x)
@@ -571,6 +577,7 @@ class ACPF(PFmethod):
                 s.problem.b = prob.b
 
         def c4(s):
+            """Admittance correction update"""
             if (params['y_correction']):
                 prob = s.problem.wrapped_problem
                 prob.apply_heuristics(s.x)
@@ -840,6 +847,71 @@ class ACPF(PFmethod):
                             if np.abs(tnew-t) > eps:
                                 break
 
+        # Update
+        solver.func(x)
+        p.update_lin()
+        solver.problem.A = p.A
+        solver.problem.b = p.b
+
+    def apply_tran_tap_rounding(self, solver):
+        """Apply transformer voltage regualtion using descrete mode."""
+
+        # Local variables
+        p = solver.problem.wrapped_problem
+        net = p.network
+        x = solver.x
+        eps = 1e-8
+
+        # Fix constraints
+        c = p.find_constraint('variable fixing')
+        A = c.A
+        b = c.b
+
+        for i in range(net.num_branches):
+
+            br = net.get_branch(i)
+
+            if br.is_in_service() and br.is_tap_changer():
+
+                assert(br.reg_bus.has_flags('variable', 'voltage magnitude'))
+                for tau in range(net.num_periods):
+
+                    if(br.has_flags('variable', 'tap ratio')):
+                        # Ratio is variable
+                        cur_ratio = x[br.index_ratio[tau]]
+                        if cur_ratio > br.ratio_max:
+                            x[br.index_ratio[tau]] = br.ratio_max
+                        elif cur_ratio < br.ratio_min:
+                            x[br.index_ratio[tau]] = br.ratio_min
+                        else:
+                            # Find closest ratio
+                            dratio = (br.ratio_max - br.ratio_min) / (br.num_ratios-1)
+                            ptn_ratios = np.arange(0, br.num_ratios)*dratio + br.ratio_min
+                            i_close = np.argmin(np.abs(ptn_ratios - cur_ratio))
+                            new_ratio = ptn_ratios[i_close]
+
+                            # Fix constr index
+                            k = int(np.where(A.col == br.index_ratio[tau])[0])
+                            ik = A.row[k]
+                            assert(np.abs(b[ik]-x[br.index_ratio[tau]]) < eps)
+                            assert(A.data[k] == 1.)
+
+                            # Update var and constraint
+                            x[br.index_ratio[tau]] = new_ratio
+                            b[ik] = new_ratio
+                    else:
+                        # Ratio not variable
+                        if br.ratio > br.ratio_max:
+                            br.ratio = br.ratio_max
+                        elif br.ratio < br.ratio_min:
+                            br.ratio = br.ratio_min
+                        else:
+                            # Find closest ratio
+                            dratio = (br.ratio_max - br.ratio_min) / (br.num_ratios-1)
+                            ptn_ratios = np.arange(0, br.num_ratios)*dratio + br.ratio_min
+                            i_close = np.argmin(np.abs(ptn_ratios - br.ratio))
+                            br.ratio = ptn_ratios[i_close]
+                        
         # Update
         solver.func(x)
         p.update_lin()
