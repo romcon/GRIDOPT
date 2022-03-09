@@ -175,6 +175,11 @@ class ACPF(PFmethod):
                       'regulator',
                       'reactive power')
 
+        net.set_flags('generator',
+                      'variable',
+                      'fixed power factor',
+                      'reactive power')
+
         # VSC HVDC
         net.set_flags('vsc converter',
                       'variable',
@@ -236,6 +241,7 @@ class ACPF(PFmethod):
         problem.add_constraint(pfnet.Constraint('VSC DC power control', net))
         problem.add_constraint(pfnet.Constraint('CSC DC power control', net))
         problem.add_constraint(pfnet.Constraint('CSC DC current control', net))
+        problem.add_constraint(pfnet.Constraint('fixed gen constant power factor', net))
 
         problem.add_constraint(pfnet.Constraint('PVPQ switching', net))
         problem.add_constraint(pfnet.Constraint('switching power factor regulation', net))
@@ -345,6 +351,10 @@ class ACPF(PFmethod):
                       'variable',
                       'regulator',
                       'reactive power')
+        net.set_flags('generator',
+                      'variable',
+                      'fixed power factor',
+                      'reactive power')
         if Q_mode == self.CONTROL_MODE_FREE and Q_limits:
             net.set_flags('generator',
                           'bounded',
@@ -436,6 +446,7 @@ class ACPF(PFmethod):
         problem.add_constraint(pfnet.Constraint('VSC DC voltage control', net))
         problem.add_constraint(pfnet.Constraint('CSC DC voltage control', net))
         problem.add_constraint(pfnet.Constraint('power factor regulation', net))
+        problem.add_constraint(pfnet.Constraint('fixed gen constant power factor', net))
 
         if lock_vsc_P_dc:
             problem.add_constraint(pfnet.Constraint('VSC DC power control', net))
