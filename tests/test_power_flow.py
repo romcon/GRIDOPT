@@ -18,7 +18,7 @@ from numpy.linalg import norm
 import optalg
 import pfnet as pf
 import gridopt as gopt
-
+import datamodel as datamodel
 
 class TestPowerFlow(unittest.TestCase):
 
@@ -757,7 +757,7 @@ class TestPowerFlow(unittest.TestCase):
 
         T = 2
 
-        infcases = ['ieee25.raw', 'ieee25.m']
+        infcases = ['ieee25.raw', 'ieee25.m', 'ieee25_wind.raw']
 
         skipcases = ['case1354.mat','case2869.mat',
                      'case3375wp.mat','case9241.mat']
@@ -1030,6 +1030,150 @@ class TestPowerFlow(unittest.TestCase):
         for gen in bus.generators:
             if gen.is_slack():
                 self.assertTrue(gen.is_redispatchable())
+
+    def test_ACPF_with_wind_machines(self):
+
+        case = os.path.join('tests', 'resources', 'cases', 'ieee25_wind.raw')
+        if not os.path.isfile(case):
+            raise unittest.SkipTest('file not available')
+
+        dm = datamodel.DataModel()
+        net = dm.parse(case,
+                       0,
+                       keep_all_out_of_service=True,
+                       round_tap_ratios=0,
+                       output_level=0,
+                       round_switched_shunts=0)
+
+        # Network
+        self.assertEqual(net.num_buses, 25)
+        self.assertEqual(net.get_num_generators(), 42)
+
+        wind_gens = [g for g in net.generators if g.is_wind_machine()]
+        num_wind_gens = len(wind_gens)
+
+        for g in wind_gens:
+            if g.bus.number == 101:
+                self.assertTrue(g.is_wind_machine_with_fixed_power_factor())
+                self.assertFalse(g.is_wind_machine_with_q_limit_from_power_factor())
+                self.assertFalse(g.is_wind_machine_with_q_limit())
+                self.assertFalse(g.is_standard_wind_machine())
+                self.assertFalse(g.is_regulator())
+                self.assertEqual(g.Q_max, g.Q_min)
+                pf = g.wind_power_factor
+                self.assertEqual(g.Q_max, g.P * np.sqrt(1-pf*pf)/pf)
+            elif g.bus.number == 102:
+                self.assertFalse(g.is_wind_machine_with_fixed_power_factor())
+                self.assertTrue(g.is_wind_machine_with_q_limit_from_power_factor())
+                self.assertTrue(g.is_wind_machine_with_q_limit())
+                self.assertFalse(g.is_standard_wind_machine())
+                self.assertTrue(g.is_regulator())
+                self.assertEqual(g.Q_max, -g.Q_min)
+                pf = g.wind_power_factor
+                self.assertEqual(abs(g.Q_max), abs(g.P * np.sqrt(1-pf*pf)/pf))
+            elif g.bus.number == 107:
+                self.assertFalse(g.is_wind_machine_with_fixed_power_factor())
+                self.assertFalse(g.is_wind_machine_with_q_limit_from_power_factor())
+                self.assertTrue(g.is_wind_machine_with_q_limit())
+                self.assertTrue(g.is_standard_wind_machine())
+                self.assertTrue(g.is_regulator())
+
+        # NR settings
+        nr_settings = {'solver': 'nr',
+                    'shunt_mode': 'locked',
+                    'tap_mode': 'regulating',
+                    'maxiter': 50,
+                    'feastol': 1e-4,
+                    'lock_csc_P_dc': True,
+                    'lock_vsc_P_dc': True,
+                    'lock_csc_i_dc': True,
+                    'Q_limits': True,
+                    'quiet': True,
+                    'v_max_clip': 1.8,
+                    'v_min_clip': 0.5,
+                    'acc_factor': 0.5}
+
+        # OPT settings
+        opt_settings = {'solver': 'augl',
+                        'shunt_mode': 'regulating',
+                        'shunt_limits': True,
+                        'tap_mode': 'regulating',
+                        'tap_limits': True,
+                        'Q_limits': True,
+                        'Q_mode': 'regulating',
+                        'v_mag_warm_ref': False,
+                        'maxiter': 50,
+                        'feastol': 1e-5,
+                        'weight_vmag': 1e0,
+                        'weight_vang': 1e-3,
+                        'weight_powers': 1e0,
+                        'weight_var': 1e-5,
+                        'weight_controls': 1e0,
+                        'v_limits': True,
+                        'quiet': True,
+                        'lock_csc_P_dc': True,
+                        'lock_vsc_P_dc': True,
+                        'lock_csc_i_dc': True,
+                        }
+        
+        # NR solve
+        method_nr = gopt.power_flow.ACPF()
+        method_nr.set_parameters(nr_settings)
+        net_nr = net.get_copy()
+        method_nr.solve(net_nr, save_problem=True)
+        method_nr.update_network(net_nr)
+        result_nr = method_nr.get_results()
+
+        # NR solve
+        method_opt = gopt.power_flow.ACPF()
+        method_opt.set_parameters(opt_settings)
+        net_opt = net.get_copy()
+        method_opt.solve(net_opt, save_problem=True)
+        method_opt.update_network(net_opt)
+        result_opt = method_opt.get_results()
+
+        # Check solution
+        for gen in net_nr.generators:
+            if gen.is_wind_machine():
+
+                if gen.is_wind_machine_with_fixed_power_factor():
+                    gen_opt = net_opt.get_generator_from_name_and_bus_number(gen.name,
+                                                                             gen.bus.number)
+                    self.assertEqual(gen.bus.number, 101)
+                    self.assertEqual(gen.Q_max, gen.Q_min)
+                    self.assertLessEqual(abs(gen.Q - gen.Q_min), 1e-4)
+                    self.assertEqual(gen_opt.bus.number, 101)
+                    self.assertEqual(gen_opt.Q_max, gen_opt.Q_min)
+
+                    self.assertLessEqual(abs(gen_opt.Q - gen.Q), 1e-4)
+
+                if gen.is_wind_machine_with_q_limit_from_power_factor():
+                    gen_opt = net_opt.get_generator_from_name_and_bus_number(gen.name,
+                                                                             gen.bus.number)
+                    self.assertEqual(gen.bus.number, 102)
+                    self.assertEqual(gen.Q_max, -gen.Q_min)
+                    self.assertLessEqual(gen.Q, gen.Q_max)
+                    self.assertGreaterEqual(gen.Q, gen.Q_min)
+                    self.assertEqual(gen_opt.bus.number, 102)
+                    self.assertEqual(gen_opt.Q_max, -gen_opt.Q_min)
+                    self.assertLessEqual(gen.Q, gen.Q_max)
+                    self.assertGreaterEqual(gen.Q, gen.Q_min)
+
+                    self.assertAlmostEqual(gen_opt.Q, gen.Q, 4)
+
+                if gen.is_standard_wind_machine():
+                    gen_opt = net_opt.get_generator_from_name_and_bus_number(gen.name,
+                                                                             gen.bus.number)
+                    self.assertEqual(gen.bus.number, 107)
+                    self.assertNotEqual(gen.Q_max, gen.Q_min)
+                    self.assertNotEqual(gen.Q_max, -gen.Q_min)
+                    self.assertLessEqual(gen.Q, gen.Q_max)
+                    self.assertGreaterEqual(gen.Q, gen.Q_min)
+                    self.assertEqual(gen_opt.bus.number, 107)
+                    self.assertLessEqual(gen.Q, gen.Q_max)
+                    self.assertGreaterEqual(gen.Q, gen.Q_min)
+
+                    self.assertAlmostEqual(gen_opt.Q, gen.Q, 4)
 
     def tearDown(self):
 
