@@ -1,3 +1,7 @@
+Unreleased
+----------
+* Add `loads_2_ZIP` parameter for ACPF to convert loads to constant imepdance if voltage drops beloew threshold (default is False).
+
 Verions 1.4.1
 -------------
 * Updated setup.py to use compiled files with `bdist_wheel_compiled` and `bdist_egg_compiled`.
