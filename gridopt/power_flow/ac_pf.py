@@ -241,6 +241,8 @@ class ACPF(PFmethod):
         problem.add_constraint(pfnet.Constraint('switching power factor regulation', net))
         problem.add_constraint(pfnet.Constraint('switching FACTS active power control', net))
         problem.add_constraint(pfnet.Constraint('switching FACTS reactive power control', net))
+        problem.add_constraint(pfnet.Constraint('switching FACTS series voltage control', net))
+        problem.add_constraint(pfnet.Constraint('switching FACTS series impedance control', net))
 
         if vdep_loads:
             problem.add_constraint(pfnet.Constraint('load voltage dependence', net))
@@ -436,6 +438,8 @@ class ACPF(PFmethod):
         problem.add_constraint(pfnet.Constraint('VSC DC voltage control', net))
         problem.add_constraint(pfnet.Constraint('CSC DC voltage control', net))
         problem.add_constraint(pfnet.Constraint('power factor regulation', net))
+        problem.add_constraint(pfnet.Constraint('switching FACTS series voltage control', net))
+        problem.add_constraint(pfnet.Constraint('switching FACTS series impedance control', net))
 
         if lock_vsc_P_dc:
             problem.add_constraint(pfnet.Constraint('VSC DC power control', net))
