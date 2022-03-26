@@ -582,6 +582,10 @@ class TestPowerFlow(unittest.TestCase):
 
         print('')
 
+        opt_infeas_cases = ['ieee25.raw', 'ieee25_mw.raw',
+                              'ieee25_mvar_in.raw', 'ieee25_mvar_out.raw',
+                              'ieee25_mvar_out_limit.raw']
+
         T = 2
 
         sol_types = {'sol1': 'no--controls',
@@ -594,6 +598,9 @@ class TestPowerFlow(unittest.TestCase):
         for case in utils.test_cases:
             for sol in list(sol_types.keys()):
                 for solver in ['nr','augl','ipopt','inlp']:
+
+                    if case.split(os.sep)[-1] in opt_infeas_cases and solver is not 'nr':
+                        continue
 
                     method = gopt.power_flow.new_method('ACPF')
                     method.set_parameters(params={'solver': solver, 'maxiter': 300})
@@ -823,7 +830,9 @@ class TestPowerFlow(unittest.TestCase):
 
         T = 2
 
-        infcases = ['ieee25.raw', 'ieee25.m']
+        infcases = ['ieee25.raw', 'ieee25.m', 'ieee25_mw.raw',
+                    'ieee25_mvar_in.raw', 'ieee25_mvar_out.raw',
+                    'ieee25_mvar_out_limit.raw']
 
         skipcases = ['case1354.mat','case2869.mat',
                      'case3375wp.mat','case9241.mat']
@@ -1288,9 +1297,9 @@ class TestPowerFlow(unittest.TestCase):
                         'maxiter': iters,
                         'feastol': 1e-5,
                         'weight_vmag': 1e0,
-                        'weight_vang': 1e-3,
+                        'weight_vang': 1e0,
                         'weight_powers': 1e0,
-                        'weight_var': 1e-5,
+                        'weight_var': 1e0,
                         'weight_controls': 1e0,
                         'v_limits': True,
                         'kappa': 1e-6,
@@ -1343,7 +1352,7 @@ class TestPowerFlow(unittest.TestCase):
                     self.assertGreater(tr.Q_km, tr.Q_max)
 
         # Solved state
-        settings.update({'maxiter': 300})
+        settings.update({'maxiter': 400})
         method = gopt.power_flow.ACPF()
         method.set_parameters(settings)
 
