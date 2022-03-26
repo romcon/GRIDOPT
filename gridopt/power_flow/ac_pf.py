@@ -25,7 +25,7 @@ class ACPF(PFmethod):
 
     name = 'ACPF'
 
-    _parameters = {'weight_vmag': 1e0,       # weight for voltage magnitude regularization
+    _parameters = {'weight_vmag': 1e2,       # weight for voltage magnitude regularization
                    'weight_vang': 1e-3,      # weight for angle difference regularization
                    'weight_powers': 1e-3,    # weight for gen powers regularization
                    'weight_controls': 1e0,   # weight for control deviation penalty
@@ -33,13 +33,15 @@ class ACPF(PFmethod):
                    'weight_redispatch': 1e0, # weight for gen real power redispatch deviation penalty
                    'v_min_clip': 0.5,        # lower v threshold for clipping
                    'v_max_clip': 1.5,        # upper v threshold for clipping
-                   'v_limits': False,        # voltage magnitude limits
+                   'v_limits': False,         # voltage magnitude limits (OPT only)
                    'Q_limits': True,         # flag for enforcing generator, VSC and FACTS reactive power limits
                    'Q_mode': 'regulating',   # reactive power mode: free, regulating
                    'shunt_limits': True,     # flag for enforcing switched shunt susceptance limits
                    'shunt_mode': 'locked',   # switched shunts mode: locked, free, regulating
                    'tap_limits': True,       # flag for enforcing transformer tap ratio limits
                    'tap_mode': 'locked',     # transformer tap ratio mode: locked, free, regulating
+                   'phase_shift_limits': True,      # flag for enforcing transformer tap ratio limits
+                   'phase_shift_mode': 'locked',    # transformer phase-shift mode: locked, free, regulating
                    'lock_vsc_P_dc': True,    # flag for locking vsc P dc
                    'lock_csc_P_dc': True,    # flag for locking csc P dc
                    'lock_csc_i_dc': True,    # flag for locking csc i dc
@@ -117,6 +119,8 @@ class ACPF(PFmethod):
         shunt_limits = params['shunt_limits']
         tap_mode = params['tap_mode']
         tap_limits = params['tap_limits']
+        phase_shift_mode = params['phase_shift_mode']
+        phase_shift_limits = params['phase_shift_limits']
         lock_vsc_P_dc = params['lock_vsc_P_dc']
         lock_csc_P_dc = params['lock_csc_P_dc']
         lock_csc_i_dc = params['lock_csc_i_dc']
@@ -125,17 +129,24 @@ class ACPF(PFmethod):
 
         # Check shunt options
         if shunt_mode not in [self.CONTROL_MODE_LOCKED,
-                               self.CONTROL_MODE_REG]:
+                              self.CONTROL_MODE_REG]:
             raise ValueError('invalid shunts mode')
         if shunt_mode == self.CONTROL_MODE_REG and not shunt_limits:
             raise ValueError('unsupported shunts configuration')
 
         # Check tap options
         if tap_mode not in [self.CONTROL_MODE_LOCKED,
-                               self.CONTROL_MODE_REG]:
+                            self.CONTROL_MODE_REG]:
             raise ValueError('invalid taps mode')
         if tap_mode == self.CONTROL_MODE_REG and not tap_limits:
             raise ValueError('unsupported taps configuration')
+
+        # Check phase-shift options
+        if phase_shift_mode not in [self.CONTROL_MODE_LOCKED,
+                                    self.CONTROL_MODE_REG]:
+            raise ValueError('invalid phase-shifter mode')
+        if phase_shift_mode == self.CONTROL_MODE_REG and not phase_shift_limits:
+            raise ValueError('unsupported phase-shifter configuration')
 
         # Check Q options
         if Q_mode != self.CONTROL_MODE_REG:
@@ -217,6 +228,9 @@ class ACPF(PFmethod):
                           'variable',
                           'tap changer - Q',
                           'tap ratio')
+        
+        # Phase-shif flags
+        if phase_shift_mode != self.CONTROL_MODE_LOCKED:
             net.set_flags('branch',
                           'variable',
                           'phase shifter',
@@ -259,8 +273,10 @@ class ACPF(PFmethod):
 
         if tap_mode != self.CONTROL_MODE_LOCKED:
             problem.add_constraint(pfnet.Constraint('switching transformer q regulation', net))
-            problem.add_constraint(pfnet.Constraint('switching transformer p regulation', net))
             problem.add_heuristic(pfnet.Heuristic('switching transformer q regulation', net))
+
+        if phase_shift_mode != self.CONTROL_MODE_LOCKED:
+            problem.add_constraint(pfnet.Constraint('switching transformer p regulation', net))
             problem.add_heuristic(pfnet.Heuristic('switching transformer p regulation', net))
 
         problem.analyze()
@@ -291,6 +307,8 @@ class ACPF(PFmethod):
         shunt_limits = params['shunt_limits']
         tap_mode = params['tap_mode']
         tap_limits = params['tap_limits']
+        phase_shift_mode = params['phase_shift_mode']
+        phase_shift_limits = params['phase_shift_limits']
         lock_vsc_P_dc = params['lock_vsc_P_dc']
         lock_csc_P_dc = params['lock_csc_P_dc']
         lock_csc_i_dc = params['lock_csc_i_dc']
@@ -314,6 +332,14 @@ class ACPF(PFmethod):
             raise ValueError('invalid taps mode')
         if tap_mode == self.CONTROL_MODE_REG and not tap_limits:
             raise ValueError('unsupported taps configuration')
+
+        # Check tap options
+        if phase_shift_mode not in [self.CONTROL_MODE_LOCKED,
+                                    self.CONTROL_MODE_FREE,
+                                    self.CONTROL_MODE_REG]:
+            raise ValueError('invalid phase-shifter mode')
+        if phase_shift_mode == self.CONTROL_MODE_REG and not phase_shift_limits:
+            raise ValueError('unsupported phase-shifter configuration')
 
         # Check Q options
         if Q_mode not in [self.CONTROL_MODE_REG,
@@ -343,7 +369,7 @@ class ACPF(PFmethod):
                           'any',
                           'voltage magnitude')
 
-        # Genertors
+        # Generators
         if gens_redispatch:
             # Assume slack gens (excep renewables) are redispatchable
             net.set_flags('generator',
@@ -414,7 +440,7 @@ class ACPF(PFmethod):
                           'any',
                           'reactive power')
 
-        # Trans mode (tap_mode include phase_shifter mode for now)
+        # Trans tap mode
         if tap_mode != self.CONTROL_MODE_LOCKED:
             net.set_flags('branch',
                           'variable',
@@ -424,11 +450,7 @@ class ACPF(PFmethod):
                           'variable',
                           'tap changer - Q',
                           'tap ratio')
-            net.set_flags('branch',
-                          'variable',
-                          'phase shifter',
-                          'phase shift')
-            # Trans reg limit (tap limits include phase_shifter limits for now)
+            # Trans reg limit
             if tap_limits:
                 net.set_flags('branch',
                             'bounded',
@@ -438,17 +460,26 @@ class ACPF(PFmethod):
                             'bounded',
                             'tap changer - Q',
                             'tap ratio')
+
+        # Trans phase-shifter mode
+        if phase_shift_mode != self.CONTROL_MODE_LOCKED:
+            net.set_flags('branch',
+                          'variable',
+                          'phase shifter',
+                          'phase shift')
+            # Reg limit
+            if phase_shift_limits:
                 net.set_flags('branch',
-                            'bounded',
-                            'phase shifter',
-                            'phase shift')
+                              'bounded',
+                              'phase shifter',
+                              'phase shift')
                 if net.get_num_asymmetric_phase_shifters() > 0:
                     net.set_flags('branch',
-                                ['variable', 'bounded'],
-                                'asymmetric phase shifter',
-                                'ratio')
+                                  ['variable', 'bounded'],
+                                  'asymmetric phase shifter',
+                                  'ratio')
 
-        # Swtiched shunts
+        # Switched shunts
         if shunt_mode != self.CONTROL_MODE_LOCKED:
             net.set_flags('shunt',
                           'variable',
@@ -504,11 +535,14 @@ class ACPF(PFmethod):
 
         if tap_mode != self.CONTROL_MODE_LOCKED:
             problem.add_function(pfnet.Function('tap ratio regularization', wc/(net.get_num_tap_changers(True)+1.), net))
-            problem.add_function(pfnet.Function('phase shift regularization', wc/(net.get_num_phase_shifters(True)+1.), net))
             if tap_mode == self.CONTROL_MODE_REG and tap_limits:
                 problem.add_function(pfnet.Function('transformer Q regularization', wc/(net.get_num_tap_changers_Q(True)+1.), net))
-                problem.add_function(pfnet.Function('transformer P regularization', wc/(net.get_num_phase_shifters(True)+1.), net))
                 problem.add_constraint(pfnet.Constraint('voltage regulation by transformers', net))
+
+        if phase_shift_mode != self.CONTROL_MODE_LOCKED:
+            problem.add_function(pfnet.Function('phase shift regularization', wc/(net.get_num_phase_shifters(True)+1.), net))
+            if phase_shift_mode == self.CONTROL_MODE_REG and phase_shift_limits:
+                problem.add_function(pfnet.Function('transformer P regularization', wc/(net.get_num_phase_shifters(True)+1.), net))
                 if net.get_num_asymmetric_phase_shifters() > 0:
                     problem.add_constraint(pfnet.Constraint('asymmetric transformer equations', net))
 

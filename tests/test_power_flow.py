@@ -52,9 +52,11 @@ class TestPowerFlow(unittest.TestCase):
         self.assertTrue(method._parameters['Q_limits'])
         self.assertTrue(method._parameters['tap_limits'])
         self.assertTrue(method._parameters['shunt_limits'])
+        self.assertTrue(method._parameters['phase_shift_limits'])
         self.assertEqual(method._parameters['Q_mode'], 'regulating')
         self.assertEqual(method._parameters['tap_mode'], 'locked')
         self.assertEqual(method._parameters['shunt_mode'], 'locked')
+        self.assertEqual(method._parameters['phase_shift_mode'], 'locked')
         method.solve(net)
         self.assertEqual(method.get_results()['solver status'], 'solved')
 
@@ -171,6 +173,44 @@ class TestPowerFlow(unittest.TestCase):
                                'tap_limits': True})
         self.assertRaises(ValueError, method.solve, net)
 
+        # Phase-shifters
+        method = gopt.power_flow.ACPF()
+        method.set_parameters({'quiet': True,
+                               'solver': 'nr',
+                               'phase_shift_mode': 'locked',
+                               'phase_shift_limits': False})
+        method.solve(net)
+        self.assertEqual(method.get_results()['solver status'], 'solved')
+
+        method = gopt.power_flow.ACPF()
+        method.set_parameters({'quiet': True,
+                               'solver': 'nr',
+                               'phase_shift_mode': 'regulating',
+                               'phase_shift_limits': False})
+        self.assertRaises(ValueError, method.solve, net)
+
+        method = gopt.power_flow.ACPF()
+        method.set_parameters({'quiet': True,
+                               'solver': 'nr',
+                               'phase_shift_mode': 'regulating',
+                               'phase_shift_limits': True})
+        method.solve(net)
+        self.assertEqual(method.get_results()['solver status'], 'solved')
+
+        method = gopt.power_flow.ACPF()
+        method.set_parameters({'quiet': True,
+                               'solver': 'nr',
+                               'phase_shift_mode': 'free',
+                               'phase_shift_limits': False})
+        self.assertRaises(ValueError, method.solve, net)
+
+        method = gopt.power_flow.ACPF()
+        method.set_parameters({'quiet': True,
+                               'solver': 'nr',
+                               'phase_shift_mode': 'free',
+                               'phase_shift_limits': True})
+        self.assertRaises(ValueError, method.solve, net)
+
     def test_ACPF_keep_all(self):
         
         for case in utils.test_cases:
@@ -231,6 +271,8 @@ class TestPowerFlow(unittest.TestCase):
                             'shunt_limits': True,
                             'tap_mode': 'regulating',
                             'tap_limits': True,
+                            'phase_shift_mode': 'regulating',
+                            'phase_shift_limits': True,
                             'lock_vsc_P_dc': False,
                             'lock_csc_P_dc': False,
                             'lock_csc_i_dc': False,
@@ -274,6 +316,8 @@ class TestPowerFlow(unittest.TestCase):
         self.assertEqual(params['shunt_limits'], True)
         self.assertEqual(params['tap_mode'], 'regulating')
         self.assertEqual(params['tap_limits'], True)
+        self.assertEqual(params['phase_shift_mode'], 'regulating')
+        self.assertEqual(params['phase_shift_limits'], True)
         self.assertEqual(params['lock_vsc_P_dc'], False)
         self.assertEqual(params['lock_csc_P_dc'], False)
         self.assertEqual(params['lock_csc_i_dc'], False)
@@ -486,7 +530,7 @@ class TestPowerFlow(unittest.TestCase):
                     tested = True
             self.assertTrue(tested)
 
-    def test_ACPF_nr_heuristics(self):
+    def test_ACPF_nr_bus_type_heuristics(self):
 
         for case in utils.test_cases:
 
@@ -542,14 +586,17 @@ class TestPowerFlow(unittest.TestCase):
 
         sol_types = {'sol1': 'no--controls',
                      'sol2': 'gen-controls',
-                     'sol3': 'all-controls'}
+                     'sol3': 'ssh-controls',
+                     'sol4': 'tap-controls',
+                     'sol5': 'phs-controls',
+                     'sol6': 'all-controls'}
 
         for case in utils.test_cases:
             for sol in list(sol_types.keys()):
-                for solver in ['nr','augl','ipopt', 'inlp']:
+                for solver in ['nr','augl','ipopt','inlp']:
 
                     method = gopt.power_flow.new_method('ACPF')
-                    method.set_parameters(params={'solver': solver})
+                    method.set_parameters(params={'solver': solver, 'maxiter': 300})
 
                     parser = pf.Parser(case)
                     parser.set('output_level', 0)
@@ -565,16 +612,34 @@ class TestPowerFlow(unittest.TestCase):
                     if net.num_buses > 2000:
                         continue
 
+                    # IPOPT having problems with ieee25.raw case when phase-shifters are regulating
+                    if 'ieee25.raw' in case and solver == 'ipopt':
+                        print("\t%s\t%s\t%s\t%s" %(case.split(os.sep)[-1],
+                                sol_types[sol],
+                                solver,
+                                'skipped'))
+                        continue
+
                     sol_file = utils.get_pf_solution_file(case, utils.DIR_PFSOL, sol)
                     sol_data = utils.read_pf_solution_file(sol_file)
 
                     # Set parameters
+                    method.set_parameters({'maxiter': 500})
                     if sol == 'sol1':
                         method.set_parameters({'Q_limits': False})
                     elif sol == 'sol2':
-                        pass # defaults
+                        pass  # default
                     elif sol == 'sol3':
+                        method.set_parameters({'shunt_mode': 'regulating'})
+                    elif sol == 'sol4':
                         method.set_parameters({'tap_mode': 'regulating'})
+                    elif sol == 'sol5':
+                        method.set_parameters({'phase_shift_mode': 'regulating',
+                                               'shunt_mode': 'regulating'})  # needed for ieee25 Q support
+                    elif sol == 'sol6':
+                        method.set_parameters({'shunt_mode': 'regulating',
+                                               'tap_mode': 'regulating', 
+                                               'phase_shift_mode': 'regulating'})
                     else:
                         raise ValueError('invalid solution type')
                     method.set_parameters({'quiet': True})
