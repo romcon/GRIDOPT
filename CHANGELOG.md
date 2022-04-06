@@ -4,6 +4,8 @@ Unreleased
 * Added transformer P, Q control functions in Opt-based ACPF.
 * Added phase shift varaibles for phase shifters.
 * Added asymmetric transformer equation on ratio and phase angle in Opt-based.
+* Added support for fixed power factor generator controls (e.g., wind machines).
+* Added support for Q limit regulation from generator power factors (e.g., wind machines).
 
 Verions 1.4.1
 -------------
