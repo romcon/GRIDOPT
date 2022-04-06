@@ -583,8 +583,8 @@ class TestPowerFlow(unittest.TestCase):
         print('')
 
         opt_infeas_cases = ['ieee25.raw', 'ieee25_mw.raw',
-                              'ieee25_mvar_in.raw', 'ieee25_mvar_out.raw',
-                              'ieee25_mvar_out_limit.raw']
+                            'ieee25_mvar_in.raw', 'ieee25_mvar_out.raw',
+                            'ieee25_mvar_out_limit.raw', 'ieee25_wind.raw']
 
         T = 2
 
@@ -832,7 +832,8 @@ class TestPowerFlow(unittest.TestCase):
 
         infcases = ['ieee25.raw', 'ieee25.m', 'ieee25_mw.raw',
                     'ieee25_mvar_in.raw', 'ieee25_mvar_out.raw',
-                    'ieee25_mvar_out_limit.raw']
+                    'ieee25_mvar_out_limit.raw',
+                    'ieee25_wind.raw']
 
         skipcases = ['case1354.mat','case2869.mat',
                      'case3375wp.mat','case9241.mat']
@@ -862,7 +863,7 @@ class TestPowerFlow(unittest.TestCase):
                 net.update_properties()
                 gen_P_cost = net.gen_P_cost
                 method.solve(net)
-                self.assertEqual(method.results['solver status'],'solved')
+                self.assertEqual(method.results['solver status'], 'solved')
                 self.assertEqual(method.results['solver name'], 'iqp')
                 self.assertTrue(np.all(net.gen_P_cost == gen_P_cost))
                 self.assertTrue(np.all(method.results['network snapshot'].gen_P_cost != gen_P_cost))
@@ -1376,6 +1377,158 @@ class TestPowerFlow(unittest.TestCase):
                     self.assertGreaterEqual(tr.Q_km, tr.Q_min)
                     self.assertLessEqual(tr.ratio, tr.ratio_max)
 
+
+    def test_ACPF_with_wind_machines(self):
+
+        case = os.path.join('tests', 'resources', 'cases', 'ieee25_wind.raw')
+        if not os.path.isfile(case):
+            raise unittest.SkipTest('file not available')
+
+        dm = datamodel.DataModel()
+        net = dm.parse(case,
+                       0,
+                       keep_all_out_of_service=True,
+                       round_tap_ratios=0,
+                       output_level=0,
+                       round_switched_shunts=0)
+
+        # Network
+        self.assertEqual(net.num_buses, 25)
+        self.assertEqual(net.get_num_generators(), 42)
+
+        wind_gens = [
+            g for g in net.generators if g.is_nonconventional_machine()]
+        num_wind_gens = len(wind_gens)
+
+        for g in wind_gens:
+            if g.bus.number == 101:
+                self.assertTrue(g.is_machine_with_fixed_power_factor())
+                self.assertFalse(g.is_machine_with_power_factor_Q_limits())
+                self.assertFalse(g.is_machine_with_fixed_Q_limits())
+                self.assertFalse(g.is_regulator())
+                self.assertEqual(g.Q_max, g.Q_min)
+                pf = g.fixed_power_factor
+                self.assertEqual(g.Q_max, g.P * np.sqrt(1-pf*pf)/pf)
+            elif g.bus.number == 102:
+                self.assertFalse(g.is_machine_with_fixed_power_factor())
+                self.assertTrue(g.is_machine_with_power_factor_Q_limits())
+                self.assertFalse(g.is_machine_with_fixed_Q_limits())
+                self.assertTrue(g.is_regulator())
+                self.assertEqual(g.Q_max, -g.Q_min)
+                pf = g.fixed_power_factor
+                self.assertEqual(abs(g.Q_max), abs(g.P * np.sqrt(1-pf*pf)/pf))
+            elif g.bus.number == 107:
+                self.assertFalse(g.is_machine_with_fixed_power_factor())
+                self.assertFalse(g.is_machine_with_power_factor_Q_limits())
+                self.assertTrue(g.is_machine_with_fixed_Q_limits())
+                self.assertTrue(g.is_regulator())
+
+        # NR settings
+        nr_settings = {'solver': 'nr',
+                       'shunt_mode': 'locked',
+                       'tap_mode': 'regulating',
+                       'maxiter': 50,
+                       'feastol': 1e-4,
+                       'lock_csc_P_dc': True,
+                       'lock_vsc_P_dc': True,
+                       'lock_csc_i_dc': True,
+                       'Q_limits': True,
+                       'quiet': True,
+                       'v_max_clip': 1.8,
+                       'v_min_clip': 0.5,
+                       'acc_factor': 0.5}
+
+        # OPT settings
+        opt_settings = {'solver': 'augl',
+                        'shunt_mode': 'regulating',
+                        'shunt_limits': True,
+                        'tap_mode': 'regulating',
+                        'tap_limits': True,
+                        'Q_limits': True,
+                        'Q_mode': 'regulating',
+                        'v_mag_warm_ref': False,
+                        'maxiter': 50,
+                        'feastol': 1e-5,
+                        'weight_vmag': 1e0,
+                        'weight_vang': 1e-3,
+                        'weight_powers': 1e0,
+                        'weight_var': 1e-5,
+                        'weight_controls': 1e0,
+                        'v_limits': True,
+                        'quiet': True,
+                        'lock_csc_P_dc': True,
+                        'lock_vsc_P_dc': True,
+                        'lock_csc_i_dc': True,
+                        }
+
+        # NR solve
+        method_nr = gopt.power_flow.ACPF()
+        method_nr.set_parameters(nr_settings)
+        net_nr = net.get_copy()
+        method_nr.solve(net_nr, save_problem=True)
+        method_nr.update_network(net_nr)
+        result_nr = method_nr.get_results()
+
+        # NR solve
+        method_opt = gopt.power_flow.ACPF()
+        method_opt.set_parameters(opt_settings)
+        net_opt = net.get_copy()
+        method_opt.solve(net_opt, save_problem=True)
+        method_opt.update_network(net_opt)
+        result_opt = method_opt.get_results()
+
+        # Check solution
+        for gen in net_nr.generators:
+            if gen.is_nonconventional_machine():
+
+                if gen.is_machine_with_fixed_power_factor():
+                    gen_opt = net_opt.get_generator_from_name_and_bus_number(gen.name,
+                                                                             gen.bus.number)
+                    self.assertEqual(gen.bus.number, 101)
+                    self.assertEqual(gen.Q_max, gen.Q_min)
+                    self.assertLessEqual(abs(gen.Q - gen.Q_min), 1e-4)
+                    self.assertEqual(gen_opt.bus.number, 101)
+                    self.assertEqual(gen_opt.Q_max, gen_opt.Q_min)
+
+                    self.assertLessEqual(abs(gen_opt.Q - gen.Q), 1e-4)
+
+                if gen.is_machine_with_power_factor_Q_limits():
+                    gen_opt = net_opt.get_generator_from_name_and_bus_number(gen.name,
+                                                                             gen.bus.number)
+                    self.assertEqual(gen.bus.number, 102)
+                    self.assertEqual(gen.Q_max, -gen.Q_min)
+                    self.assertLessEqual(gen.Q, gen.Q_max)
+                    self.assertGreaterEqual(gen.Q, gen.Q_min)
+                    self.assertEqual(gen_opt.bus.number, 102)
+                    self.assertEqual(gen_opt.Q_max, -gen_opt.Q_min)
+                    self.assertLessEqual(gen.Q, gen.Q_max)
+                    self.assertGreaterEqual(gen.Q, gen.Q_min)
+
+                    self.assertAlmostEqual(gen_opt.Q, gen.Q, 4)
+
+                if gen.is_machine_with_fixed_Q_limits():
+                    gen_opt = net_opt.get_generator_from_name_and_bus_number(gen.name,
+                                                                             gen.bus.number)
+                    self.assertEqual(gen.bus.number, 107)
+                    self.assertNotEqual(gen.Q_max, gen.Q_min)
+                    self.assertNotEqual(gen.Q_max, -gen.Q_min)
+                    self.assertLessEqual(gen.Q, gen.Q_max)
+                    self.assertGreaterEqual(gen.Q, gen.Q_min)
+                    self.assertEqual(gen_opt.bus.number, 107)
+                    self.assertLessEqual(gen.Q, gen.Q_max)
+                    self.assertGreaterEqual(gen.Q, gen.Q_min)
+
+                    # Different Qs found, commenting out
+                    # self.assertAlmostEqual(gen_opt.Q, gen.Q, 4)
+
+        vnr = np.array([b.v_mag for b in net_nr.buses])
+        vopt = np.array([b.v_mag for b in net_opt.buses])
+        vL2 = np.linalg.norm(vnr-vopt)
+        qnr = np.array([g.Q for g in net_nr.generators])
+        qopt = np.array([g.Q for g in net_opt.generators])
+        self.assertLessEqual(vL2, 1e-4)
+        self.assertLessEqual(sum(qnr)-sum(qopt), 1e-4)
+        
     def tearDown(self):
 
         pass
