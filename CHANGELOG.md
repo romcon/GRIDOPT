@@ -6,6 +6,7 @@ Unreleased
 * Added asymmetric transformer equation on ratio and phase angle in Opt-based.
 * Added support for fixed power factor generator controls (e.g., wind machines).
 * Added support for Q limit regulation from generator power factors (e.g., wind machines).
+* Added `loads_2_ZIP` parameter for ACPF to convert loads to constant imepdance if voltage drops beloew threshold (default is False).
 
 Verions 1.4.1
 -------------

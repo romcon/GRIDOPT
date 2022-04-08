@@ -14,7 +14,7 @@ from os.path import join
 DIR_CASES = join('.', 'tests', 'resources', 'cases')
 DIR_PFSOL = join('.', 'tests', 'resources', 'pf_solutions')
 
-SPECIAL_CASES = ['ieee25_mvar_in.raw', 'ieee25_mvar_out_limit.raw', 'ieee25_mvar_out.raw', 'ieee25_mw.raw']
+SPECIAL_CASES = ['ieee25_mvar_in.raw', 'ieee25_mvar_out_limit.raw', 'ieee25_mvar_out.raw', 'ieee25_mw.raw', 'ieee25_wind.raw']
 
 test_cases = [join(DIR_CASES, f) for f in listdir(DIR_CASES) if f not in SPECIAL_CASES]
 test_cases.sort()

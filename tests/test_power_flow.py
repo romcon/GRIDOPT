@@ -14,7 +14,6 @@ import numpy as np
 from . import utils
 from numpy.linalg import norm
 
-
 import optalg
 import pfnet as pf
 import gridopt as gopt
@@ -367,7 +366,6 @@ class TestPowerFlow(unittest.TestCase):
             self.assertEqual(acpf.get_parameters()['solver'], sol)
             self.assertRaises(gopt.power_flow.method_error.PFmethodError_SolverError, acpf.solve, net, {'quiet': True})
             
-
     def test_ACOPF_parameters(self):
 
         acopf = gopt.power_flow.ACOPF()
@@ -532,7 +530,13 @@ class TestPowerFlow(unittest.TestCase):
 
     def test_ACPF_nr_bus_type_heuristics(self):
 
+        skipcases = ['aesoSL2014.raw', 'case2869.mat', 'case9241.mat', 'case32.art',
+                     'ieee59_convert_to_zil_to_solve.raw']
+
         for case in utils.test_cases:
+
+            if case.split(os.sep)[-1] in skipcases:
+                continue
 
             parser = pf.Parser(case)
             parser.set('output_level', 0)
@@ -595,7 +599,14 @@ class TestPowerFlow(unittest.TestCase):
                      'sol5': 'phs-controls',
                      'sol6': 'all-controls'}
 
+        skipcases = ['aesoSL2014.raw', 'case2869.mat', 'case9241.mat', 'case32.art',
+                     'ieee59_convert_to_zil_to_solve.raw']
+
         for case in utils.test_cases:
+
+            if case.split(os.sep)[-1] in skipcases:
+                continue
+
             for sol in list(sol_types.keys()):
                 for solver in ['nr','augl','ipopt','inlp']:
 
@@ -603,7 +614,7 @@ class TestPowerFlow(unittest.TestCase):
                         continue
 
                     method = gopt.power_flow.new_method('ACPF')
-                    method.set_parameters(params={'solver': solver, 'maxiter': 300})
+                    method.set_parameters(params={'solver': solver, 'maxiter': 500})
 
                     parser = pf.Parser(case)
                     parser.set('output_level', 0)
@@ -614,6 +625,7 @@ class TestPowerFlow(unittest.TestCase):
 
                     self.assertEqual(net.num_periods,1)
                     self.assertEqual(netMP.num_periods,T)
+
 
                     # Only small
                     if net.num_buses > 2000:
@@ -631,7 +643,6 @@ class TestPowerFlow(unittest.TestCase):
                     sol_data = utils.read_pf_solution_file(sol_file)
 
                     # Set parameters
-                    method.set_parameters({'maxiter': 500})
                     if sol == 'sol1':
                         method.set_parameters({'Q_limits': False})
                     elif sol == 'sol2':
@@ -752,7 +763,8 @@ class TestPowerFlow(unittest.TestCase):
         method_inlp = gopt.power_flow.new_method('ACOPF')
         method_inlp.set_parameters(params={'solver':'inlp','quiet': True})
 
-        skipcases = ['aesoSL2014.raw','case2869.mat','case9241.mat','case32.art']
+        skipcases = ['aesoSL2014.raw','case2869.mat','case9241.mat','case32.art',
+                     'ieee59_convert_to_zil_to_solve.raw']
 
         for case in utils.test_cases:
 
@@ -836,7 +848,8 @@ class TestPowerFlow(unittest.TestCase):
                     'ieee25_wind.raw']
 
         skipcases = ['case1354.mat','case2869.mat',
-                     'case3375wp.mat','case9241.mat']
+                     'case3375wp.mat','case9241.mat',
+                     'ieee59_convert_to_zil_to_solve.raw']
 
         method = gopt.power_flow.new_method('DCOPF')
 
@@ -1106,6 +1119,66 @@ class TestPowerFlow(unittest.TestCase):
         for gen in bus.generators:
             if gen.is_slack():
                 self.assertTrue(gen.is_redispatchable())
+    
+    def test_acpf_with_zip_loads(self):
+
+        case = os.path.join('tests', 'resources', 'cases',
+                            'ieee59_convert_to_zil_to_solve.raw')
+        if not os.path.isfile(case):
+            raise unittest.SkipTest('file not available')
+
+        parser = pf.Parser(case)
+        parser.set('output_level', 0)
+        net = parser.parse(case)
+        load_orig = net.get_load_from_name_and_bus_number('1', 49)
+
+        acpf = gopt.power_flow.ACPF()
+        acpf.set_parameters(params={'solver': 'nr',
+                                    'loads_2_ZIP': False,
+                                    'quiet': True})
+        try:
+            acpf.solve(net)
+        except gopt.power_flow.method_error.PFmethodError_SolverError:
+            pass
+        
+        # Check no ZIP failed solution
+        no_load_2_zip = acpf.get_results()
+        net_no_zip = no_load_2_zip['network snapshot']
+        load_no_zip = net_no_zip.get_load_from_name_and_bus_number('1', 49)
+        self.assertTrue(load_no_zip.bus.v_mag < 0.8)
+        self.assertEqual(load_orig.P, load_no_zip.P)
+        self.assertEqual(load_orig.Q, load_no_zip.Q)
+        self.assertEqual(no_load_2_zip['solver status'], 'error')
+
+        # Check with ZIP found solution
+        acpf.set_parameters(params={'loads_2_ZIP': True})
+        acpf.solve(net)
+        with_load_2_zip = acpf.get_results()       
+        net_with_zip = with_load_2_zip['network snapshot']
+        load_zip = net_with_zip.get_load_from_name_and_bus_number('1', 49)
+        vm = load_zip.bus.v_mag
+        self.assertTrue(vm <= 0.85)
+        self.assertTrue(load_orig.P > load_zip.P)
+        self.assertTrue(load_orig.Q > load_zip.Q)
+        self.assertAlmostEqual(
+            load_zip.P, 
+            load_zip.comp_cp + load_zip.comp_ci + load_zip.comp_cg, 4)
+        self.assertAlmostEqual(
+            load_zip.Q, 
+            -(load_zip.comp_cb - load_zip.comp_cq - load_zip.comp_cj), 4)
+        self.assertEqual(with_load_2_zip['solver status'], 'solved')
+
+        # Compare with PSSE solution
+        import csv
+        psse_res_file = os.path.join('tests', 'resources', 'pf_solutions', 
+            'ieee59_convert_to_zil_psse_results.csv')
+        with open(psse_res_file, 'r') as f:
+            reader = csv.reader(f)
+            next(reader)
+            for row in reader:
+                bus = net_with_zip.get_bus_from_number(int(row[0]))
+                self.assertTrue(np.abs(bus.v_mag - float(row[2])) < 0.01)
+                self.assertTrue(np.abs(bus.v_ang*180./np.pi - float(row[3])) < 0.2)
 
     def test_ACPF_with_phase_shifter_P_mode(self):
         self.run_test_ACPF_with_phase_shifter_P_mode(method_name='nr')

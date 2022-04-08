@@ -25,7 +25,7 @@ class ACPF(PFmethod):
 
     name = 'ACPF'
 
-    _parameters = {'weight_vmag': 1e2,       # weight for voltage magnitude regularization
+    _parameters = {'weight_vmag': 1e0,       # weight for voltage magnitude regularization
                    'weight_vang': 1e-3,      # weight for angle difference regularization
                    'weight_powers': 1e-3,    # weight for gen powers regularization
                    'weight_controls': 1e0,   # weight for control deviation penalty
@@ -57,18 +57,21 @@ class ACPF(PFmethod):
                    'shunt_step': 0.5,        # susceptance acceleration factor (NR only)
                    'dtap': 1e-4,             # tap ratio perturbation (NR only)
                    'load_q_curtail': False,  # flag for allowing load Q to change (OPT only)
-                   'dsus': 1e-4}             # susceptance perturbation (NR only)
+                   'dsus': 1e-4,             # susceptance perturbation (NR only)
+                   'v_min_2_ZIP': 0.85,      # minimum voltage threshold to convert loads to constant impedance
+                   'loads_2_ZIP': False}     # Flag to convert loads to constant impedance if the voltage drops below
+                                             # v_min_2_ZIP
 
-    _parameters_augl = {'feastol' : 1e-4,
-                        'optol' : 1e0,
-                        'kappa' : 1e-5,
+    _parameters_augl = {'feastol': 1e-4,
+                        'optol': 1e0,
+                        'kappa': 1e-5,
                         'theta_max': 1e-6,
                         'sigma_init_max': 1e9}
 
     _parameters_ipopt = {}
 
-    _parameters_inlp = {'feastol' : 1e-4,
-                        'optol' : 1e0}
+    _parameters_inlp = {'feastol': 1e-4,
+                        'optol': 1e0}
 
     _parameters_nr = {}
 
@@ -126,6 +129,7 @@ class ACPF(PFmethod):
         lock_csc_i_dc = params['lock_csc_i_dc']
         vdep_loads = params['vdep_loads']
         gens_redispatch = params['gens_redispatch']
+        convert_loads_2_zip = params['loads_2_ZIP']
 
         # Check shunt options
         if shunt_mode not in [self.CONTROL_MODE_LOCKED,
@@ -216,12 +220,17 @@ class ACPF(PFmethod):
                       'all')
 
         # Loads
-        if vdep_loads:
+        if vdep_loads or convert_loads_2_zip:
             for load in net.loads:
-                if load.is_voltage_dependent() and load.is_in_service():
-                    net.set_flags_of_component(load,
-                                               'variable',
-                                               ['active power', 'reactive power'])
+                if load.is_in_service():
+                    if convert_loads_2_zip:      # Consider all loads
+                        net.set_flags_of_component(load,
+                                                   'variable',
+                                                   ['active power', 'reactive power'])
+                    if load.is_voltage_dependent():  # Consider only voltage dependent loads
+                        net.set_flags_of_component(load,
+                                                   'variable',
+                                                   ['active power', 'reactive power'])
 
         # Tap changers
         if tap_mode != self.CONTROL_MODE_LOCKED:
@@ -272,7 +281,7 @@ class ACPF(PFmethod):
         problem.add_constraint(pfnet.Constraint('switching FACTS series voltage control', net))
         problem.add_constraint(pfnet.Constraint('switching FACTS series impedance control', net))
 
-        if vdep_loads:
+        if vdep_loads or convert_loads_2_zip:
             problem.add_constraint(pfnet.Constraint('load voltage dependence', net))
 
         if Q_limits:
@@ -327,16 +336,16 @@ class ACPF(PFmethod):
 
         # Check shunt options
         if shunt_mode not in [self.CONTROL_MODE_LOCKED,
-                               self.CONTROL_MODE_FREE,
-                               self.CONTROL_MODE_REG]:
+                              self.CONTROL_MODE_FREE,
+                              self.CONTROL_MODE_REG]:
             raise ValueError('invalid shunts mode')
         if shunt_mode == self.CONTROL_MODE_REG and not shunt_limits:
             raise ValueError('unsupported shunts configuration')
 
         # Check tap options
         if tap_mode not in [self.CONTROL_MODE_LOCKED,
-                             self.CONTROL_MODE_FREE,
-                             self.CONTROL_MODE_REG]:
+                            self.CONTROL_MODE_FREE,
+                            self.CONTROL_MODE_REG]:
             raise ValueError('invalid taps mode')
         if tap_mode == self.CONTROL_MODE_REG and not tap_limits:
             raise ValueError('unsupported taps configuration')
@@ -616,6 +625,9 @@ class ACPF(PFmethod):
         vmin_thresh = params['vmin_thresh']
         solver_name = params['solver']
         solver_params = params['solver_parameters']
+        quiet = solver_params[solver_name]['quiet']
+        convert_loads_2_zip = params['loads_2_ZIP']
+        vmin_to_zip = params['v_min_2_ZIP']
 
         # Opt solver
         if solver_name == 'augl':
@@ -654,10 +666,28 @@ class ACPF(PFmethod):
                 s.problem.A = prob.A
                 s.problem.b = prob.b
 
+        def c4(s):
+            net = s.problem.wrapped_problem.network
+            if s.problem.wrapped_problem.network.bus_v_min <= vmin_to_zip:
+                for lod in net.loads:
+                    if lod.is_in_service():
+                        bus_v = s.get_primal_variables()[lod.bus.index_v_mag]
+                        if bus_v <= vmin_to_zip:
+                            # Move cp&ci to cg
+                            lod.comp_cg = lod.comp_cp + lod.comp_ci + lod.comp_cg
+                            lod.comp_cp = 0.0
+                            lod.comp_ci = 0.0
+                            # Move cq&cj to cb
+                            lod.comp_cb = lod.comp_cb - lod.comp_cq - lod.comp_cj
+                            lod.comp_cq = 0.0
+                            lod.comp_cj = 0.0
+
         if solver_name == 'nr':
             solver.add_callback(OptCallback(c1))
             solver.add_callback(OptCallback(c2))
             solver.add_callback(OptCallback(c3))
+            if convert_loads_2_zip:
+                solver.add_callback(OptCallback(c4))
 
         # Termination
         def t1(s):
@@ -693,6 +723,13 @@ class ACPF(PFmethod):
                     net.clear_sensitivities()
                     if solver_name != 'nr':
                         problem.store_sensitivities(*solver.get_dual_variables())
+
+            if not quiet and convert_loads_2_zip and solver.problem.wrapped_problem.network.bus_v_min <= vmin_to_zip:
+                for lod in net.loads:
+                    if lod.is_in_service():
+                        bus_v = solver.get_primal_variables()[lod.bus.index_v_mag]
+                        if bus_v <= vmin_to_zip:
+                            print(f"  Converted load {lod.name}, at bus {lod.bus.number} with v_mag={bus_v:>1.4f} to ZIP load")
 
             # Save results
             self.set_solver_name(solver_name)
