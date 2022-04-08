@@ -1,11 +1,22 @@
+Unreleased
+----------
+* Added transformer P, Q control constraints and heuristics in NR.
+* Added transformer P, Q control functions in Opt-based ACPF.
+* Added phase shift varaibles for phase shifters.
+* Added asymmetric transformer equation on ratio and phase angle in Opt-based.
+* Added support for fixed power factor generator controls (e.g., wind machines).
+* Added support for Q limit regulation from generator power factors (e.g., wind machines).
+* Add FACTS constraints with for series voltage control and series impedance control.
+* Added `loads_2_ZIP` parameter for ACPF to convert loads to constant imepdance if voltage drops beloew threshold (default is False).
+* Adding admittance correction parameter `y_correction` and callback to ACPF Newton-Raphson only.
+* Added tap-changer rounding parameter `taps_round` that will round taps each step if tap-mode is regulating.
+
 Verions 1.4.1
 -------------
 * Updated setup.py to use compiled files with `bdist_wheel_compiled` and `bdist_egg_compiled`.
 * Added `load_q_curtail` parameter setting to ACPF that allows for load.Q to deviate.
 * Change `gens_redispatch` as True that forced changing slack to redispatchable.
 * Separate ACPF.solve into steps for `initialize_problem` and `solve_problem` in order to reduce computation time with contructing the problem for contingencies or other calculations where the problem construction does not change.
-* Adding admittance correction parameter `y_correction` and callback to ACPF Newton-Raphson only.
-* Added tap-changer rounding parameter `taps_round` that will round taps each step if tap-mode is regulating.
 
 Version 1.4.0
 -------------
