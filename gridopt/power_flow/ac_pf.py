@@ -55,6 +55,7 @@ class ACPF(PFmethod):
                    'shunt_step': 0.5,        # susceptance acceleration factor (NR only)
                    'dtap': 1e-4,             # tap ratio perturbation (NR only)
                    'load_q_curtail': False,  # flag for allowing load Q to change (OPT only)
+                   'P_transfer': False,      # flag for enabling inter-area transfer or not
                    'dsus': 1e-4}             # susceptance perturbation (NR only)
 
     _parameters_augl = {'feastol' : 1e-4,
@@ -122,6 +123,7 @@ class ACPF(PFmethod):
         lock_csc_i_dc = params['lock_csc_i_dc']
         vdep_loads = params['vdep_loads']
         gens_redispatch = params['gens_redispatch']
+        P_transfer = params['P_transfer']
 
         # Check shunt options
         if shunt_mode not in [self.CONTROL_MODE_LOCKED,
@@ -221,6 +223,13 @@ class ACPF(PFmethod):
                           'switching - v',
                           'susceptance')
 
+        # Inter-area transfer
+        if P_transfer:
+            net.set_flags('transfer',
+                          'variable',
+                          'any',
+                          'all')
+
         # Set up problem
         problem = pfnet.Problem(net)
 
@@ -248,6 +257,10 @@ class ACPF(PFmethod):
         if Q_limits:
             problem.add_heuristic(pfnet.Heuristic('PVPQ switching', net))
             problem.add_heuristic(pfnet.Heuristic('switching power factor regulation', net))
+
+        if P_transfer:
+            problem.add_constraint(pfnet.Constraint('switching area transfer equation', net))
+            problem.add_heuristic(pfnet.Heuristic('switching area transfer equation', net))
 
         problem.analyze()
 
@@ -284,6 +297,7 @@ class ACPF(PFmethod):
         v_mag_warm_ref = params['v_mag_warm_ref']
         gens_redispatch = params['gens_redispatch']
         curtail_load_q = params['load_q_curtail']
+        P_transfer = params['P_transfer']
 
         # Check shunt options
         if shunt_mode not in [self.CONTROL_MODE_LOCKED,
@@ -424,6 +438,19 @@ class ACPF(PFmethod):
                           'switching - v',
                           'susceptance')
 
+        # Inter-area transfer
+        if P_transfer:
+            buses = net.get_area_slack_buses()
+            for bus in buses:
+                for gen in bus.generators:
+                    net.set_flags_of_component(gen,
+                                               'variable',
+                                               'active power')
+            net.set_flags('transfer',
+                          'variable',
+                          'any',
+                          'all')
+
         # Set up problem
         problem = pfnet.Problem(net)
 
@@ -478,6 +505,9 @@ class ACPF(PFmethod):
 
         if vdep_loads:
             problem.add_constraint(pfnet.Constraint('load voltage dependence', net))
+
+        if P_transfer:
+            problem.add_constraint(pfnet.Constraint('area transfer regulation', net))
 
         if net.num_bounded > 0:
             problem.add_constraint(pfnet.Constraint('variable bounds', net))
