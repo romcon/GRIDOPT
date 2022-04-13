@@ -59,7 +59,7 @@ class ACPF(PFmethod):
                    'load_q_curtail': False,  # flag for allowing load Q to change (OPT only)
                    'dsus': 1e-4,             # susceptance perturbation (NR only)
                    'v_min_2_ZIP': 0.85,      # minimum voltage threshold to convert loads to constant impedance
-                   'loads_2_ZIP': False}     # Flag to convert loads to constant impedance if the voltage drops below
+                   'loads_2_ZIP': True}     # Flag to convert loads to constant impedance if the voltage drops below
                                              # v_min_2_ZIP
 
     _parameters_augl = {'feastol': 1e-4,
