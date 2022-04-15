@@ -259,8 +259,8 @@ class ACPF(PFmethod):
             problem.add_heuristic(pfnet.Heuristic('switching power factor regulation', net))
 
         if P_transfer:
-            problem.add_constraint(pfnet.Constraint('switching area transfer equation', net))
-            problem.add_heuristic(pfnet.Heuristic('switching area transfer equation', net))
+            problem.add_constraint(pfnet.Constraint('switching area transfer regulation', net))
+            problem.add_heuristic(pfnet.Heuristic('switching area transfer regulation', net))
 
         problem.analyze()
 
