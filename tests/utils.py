@@ -17,6 +17,14 @@ DIR_PFSOL = join('.', 'tests', 'resources', 'pf_solutions')
 test_cases = [join(DIR_CASES, f) for f in listdir(DIR_CASES)]
 test_cases.sort()
 
+skip_cases = ['case6_transfer.raw']
+
+# Remove skip cases from lists
+for case in skip_cases:
+    case_with_path = os.path.join(DIR_CASES, case)
+    if case_with_path in test_cases:
+        test_cases.remove(case_with_path)
+
 def get_pf_solution_file(case_file, dir, sol):
     """
     Gets power flow solution file path.
