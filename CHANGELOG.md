@@ -1,3 +1,8 @@
+Unreleased
+----------
+* Added variables on Inter-Area Transfer.
+* Added constraints and heuristics on regulating inter-area transfer MW.
+
 Verions 1.4.1
 -------------
 * Updated setup.py to use compiled files with `bdist_wheel_compiled` and `bdist_egg_compiled`.
