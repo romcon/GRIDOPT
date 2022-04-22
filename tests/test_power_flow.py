@@ -606,7 +606,7 @@ class TestPowerFlow(unittest.TestCase):
         opt_infeas_cases = ['ieee25.raw', 'ieee25_mw.raw',
                             'ieee25_mvar_in.raw', 'ieee25_mvar_out.raw',
                             'ieee25_mvar_out_limit.raw', 'ieee25_wind.raw',
-                            'ieee25_zcor_tap.raw',
+                            'ieee25_zcor.raw',
                             'aesoSL2014.raw']
 
         T = 2
@@ -619,7 +619,7 @@ class TestPowerFlow(unittest.TestCase):
                      'sol6': 'all-controls'}
 
         skipcases =  ['ieee59_convert_to_zil_to_solve.raw',
-                      'ieee25_zcor_tap.raw']
+                      'ieee25_zcor.raw']
 
         for case in utils.test_cases:
 
@@ -866,7 +866,7 @@ class TestPowerFlow(unittest.TestCase):
         infcases = ['ieee25.raw', 'ieee25.m', 'ieee25_mw.raw',
                     'ieee25_mvar_in.raw', 'ieee25_mvar_out.raw',
                     'ieee25_mvar_out_limit.raw', 
-                    'ieee25_wind.raw', 'ieee25_zcor_tap.raw']
+                    'ieee25_wind.raw', 'ieee25_zcor.raw']
 
         skipcases = ['case1354.mat','case2869.mat',
                      'case3375wp.mat','case9241.mat',
