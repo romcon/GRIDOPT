@@ -10,7 +10,9 @@ from __future__ import print_function
 import os
 import copy
 import unittest
+from gridopt.power_flow.method_error import PFmethodError
 import numpy as np
+from optalg.opt_solver.opt_solver_error import OptSolverError
 from . import utils
 from numpy.linalg import norm
 
@@ -55,6 +57,7 @@ class TestPowerFlow(unittest.TestCase):
         self.assertEqual(method._parameters['Q_mode'], 'regulating')
         self.assertEqual(method._parameters['tap_mode'], 'locked')
         self.assertEqual(method._parameters['shunt_mode'], 'locked')
+        self.assertTrue(method._parameters['y_correction'])
         self.assertEqual(method._parameters['phase_shift_mode'], 'locked')
         method.solve(net)
         self.assertEqual(method.get_results()['solver status'], 'solved')
@@ -172,6 +175,14 @@ class TestPowerFlow(unittest.TestCase):
                                'tap_limits': True})
         self.assertRaises(ValueError, method.solve, net)
 
+        # Impedance correction
+        method = gopt.power_flow.ACPF()
+        method.set_parameters({'quiet': True,
+                               'solver': 'nr',
+                               'y_correction': False})
+        method.solve(net)
+        self.assertEqual(method.get_results()['solver status'], 'solved')
+
         # Phase-shifters
         method = gopt.power_flow.ACPF()
         method.set_parameters({'quiet': True,
@@ -270,6 +281,7 @@ class TestPowerFlow(unittest.TestCase):
                             'shunt_limits': True,
                             'tap_mode': 'regulating',
                             'tap_limits': True,
+                            'y_correction': False,
                             'phase_shift_mode': 'regulating',
                             'phase_shift_limits': True,
                             'lock_vsc_P_dc': False,
@@ -315,6 +327,7 @@ class TestPowerFlow(unittest.TestCase):
         self.assertEqual(params['shunt_limits'], True)
         self.assertEqual(params['tap_mode'], 'regulating')
         self.assertEqual(params['tap_limits'], True)
+        self.assertEqual(params['y_correction'], False)
         self.assertEqual(params['phase_shift_mode'], 'regulating')
         self.assertEqual(params['phase_shift_limits'], True)
         self.assertEqual(params['lock_vsc_P_dc'], False)
@@ -450,6 +463,10 @@ class TestPowerFlow(unittest.TestCase):
             method.solve(net)
 
             results = method.get_results()
+            print("\t%s\t%s\t%s" %(
+                case.split(os.sep)[-1], 
+                results['solver name'], 
+                results['solver status']))
 
             self.assertEqual(results['solver status'], 'solved')
             self.assertTrue(results['solver name'] in ['mumps','superlu'])
@@ -588,7 +605,9 @@ class TestPowerFlow(unittest.TestCase):
 
         opt_infeas_cases = ['ieee25.raw', 'ieee25_mw.raw',
                             'ieee25_mvar_in.raw', 'ieee25_mvar_out.raw',
-                            'ieee25_mvar_out_limit.raw', 'ieee25_wind.raw']
+                            'ieee25_mvar_out_limit.raw', 'ieee25_wind.raw',
+                            'ieee25_zcor.raw',
+                            'aesoSL2014.raw']
 
         T = 2
 
@@ -599,8 +618,8 @@ class TestPowerFlow(unittest.TestCase):
                      'sol5': 'phs-controls',
                      'sol6': 'all-controls'}
 
-        skipcases = ['aesoSL2014.raw', 'case2869.mat', 'case9241.mat', 'case32.art',
-                     'ieee59_convert_to_zil_to_solve.raw']
+        skipcases =  ['ieee59_convert_to_zil_to_solve.raw',
+                      'ieee25_zcor.raw']
 
         for case in utils.test_cases:
 
@@ -608,13 +627,10 @@ class TestPowerFlow(unittest.TestCase):
                 continue
 
             for sol in list(sol_types.keys()):
-                for solver in ['nr','augl','ipopt','inlp']:
-
-                    if case.split(os.sep)[-1] in opt_infeas_cases and solver is not 'nr':
-                        continue
+                for solver in ['nr', 'augl', 'ipopt', 'inlp']:
 
                     method = gopt.power_flow.new_method('ACPF')
-                    method.set_parameters(params={'solver': solver, 'maxiter': 500})
+                    method.set_parameters(params={'solver': solver, 'maxiter': 200})
 
                     parser = pf.Parser(case)
                     parser.set('output_level', 0)
@@ -626,17 +642,8 @@ class TestPowerFlow(unittest.TestCase):
                     self.assertEqual(net.num_periods,1)
                     self.assertEqual(netMP.num_periods,T)
 
-
                     # Only small
-                    if net.num_buses > 2000:
-                        continue
-
-                    # IPOPT having problems with ieee25.raw case when phase-shifters are regulating
-                    if 'ieee25.raw' in case and solver == 'ipopt':
-                        print("\t%s\t%s\t%s\t%s" %(case.split(os.sep)[-1],
-                                sol_types[sol],
-                                solver,
-                                'skipped'))
+                    if net.num_buses > 2500:
                         continue
 
                     sol_file = utils.get_pf_solution_file(case, utils.DIR_PFSOL, sol)
@@ -660,95 +667,106 @@ class TestPowerFlow(unittest.TestCase):
                                                'phase_shift_mode': 'regulating'})
                     else:
                         raise ValueError('invalid solution type')
+                    
                     method.set_parameters({'quiet': True})
 
                     bus_P_mis = net.bus_P_mis
+                    solved = False
                     try:
                         method.solve(net)
+                        solved = True
                     except ImportError:
                         continue # no ipopt
+                    except PFmethodError:
+                        self.assertTrue(case.split(os.sep)[-1] in opt_infeas_cases)
+                        solved = False
+                    
                     results = method.get_results()
-                    self.assertEqual(results['solver name'], solver)
-                    self.assertEqual(results['solver status'],'solved')
-                    self.assertEqual(net.bus_P_mis,bus_P_mis)
-                    self.assertLessEqual(results['network snapshot'].bus_P_mis,bus_P_mis)
-                    method.update_network(net)
 
-                    net_snap = results['network snapshot']
-                    for bus in net_snap.buses:
-                        obus = net.get_bus_from_number(bus.number)
-                        self.assertEqual(bus.v_ang, obus.v_ang)
-                        self.assertEqual(bus.v_mag, obus.v_mag)
-                        self.assertAlmostEqual(bus.P_mismatch, net.get_bus_from_number(bus.number).P_mismatch, places=10)
-                    for gen in net_snap.generators:
-                        self.assertEqual(gen.P, net.get_generator(gen.index).P)
-                    for load in net_snap.loads:
-                        self.assertEqual(load.P, net.get_load(load.index).P)
-                    for shunt in net_snap.shunts:
-                        self.assertEqual(shunt.g, net.get_shunt(shunt.index).g)
-
-                    self.assertLess(abs(net.bus_P_mis), 1e-2) # MW
-                    self.assertLess(abs(net.bus_Q_mis), 1e-2) # MVAr
-
-                    self.assertAlmostEqual(results['network snapshot'].bus_P_mis, net.bus_P_mis, places=10)
-                    self.assertAlmostEqual(results['network snapshot'].bus_Q_mis, net.bus_Q_mis, places=10)
-
-                    method.solve(netMP)
-                    resultsMP = method.get_results()
-                    self.assertEqual(resultsMP['solver status'],'solved')
-                    method.update_network(netMP)
-
-                    self.assertLess(np.max(np.abs(netMP.bus_P_mis)), 1e-2) # MW
-                    self.assertLess(np.max(np.abs(netMP.bus_Q_mis)), 1e-2) # MVAr
-
-                    self.assertLess(norm(resultsMP['network snapshot'].bus_P_mis-netMP.bus_P_mis,np.inf),1e-10)
-                    self.assertLess(norm(resultsMP['network snapshot'].bus_Q_mis-netMP.bus_Q_mis,np.inf),1e-10)
-                    self.assertLess(norm(resultsMP['network snapshot'].gen_P_cost-netMP.gen_P_cost,np.inf),1e-10)
-
-                    # Sol validation
                     validated = ''
-                    if sol_data is not None:
+                    if solved:
+                        self.assertEqual(results['solver name'], solver)
+                        self.assertEqual(results['solver status'],'solved')
+                        self.assertEqual(net.bus_P_mis,bus_P_mis)
+                        self.assertLessEqual(results['network snapshot'].bus_P_mis,bus_P_mis)
+                        method.update_network(net)
 
-                        v_mag_tol = sol_data['v_mag_tol']
-                        v_ang_tol = sol_data['v_ang_tol']
-                        bus_data = sol_data['bus_data']
+                        net_snap = results['network snapshot']
+                        for bus in net_snap.buses:
+                            obus = net.get_bus_from_number(bus.number)
+                            self.assertEqual(bus.v_ang, obus.v_ang)
+                            self.assertEqual(bus.v_mag, obus.v_mag)
+                            self.assertAlmostEqual(bus.P_mismatch, net.get_bus_from_number(bus.number).P_mismatch, places=10)
+                        for gen in net_snap.generators:
+                            self.assertEqual(gen.P, net.get_generator(gen.index).P)
+                        for load in net_snap.loads:
+                            self.assertEqual(load.P, net.get_load(load.index).P)
+                        for shunt in net_snap.shunts:
+                            self.assertEqual(shunt.g, net.get_shunt(shunt.index).g)
 
-                        counter = 0
-                        v_mag_error = []
-                        v_ang_error = []
-                        for bus_num,val in list(bus_data.items()):
+                        self.assertLess(abs(net.bus_P_mis), 1e-2) # MW
+                        self.assertLess(abs(net.bus_Q_mis), 1e-2) # MVAr
 
-                            v_mag = val['v_mag']
-                            v_ang = val['v_ang']
+                        self.assertAlmostEqual(results['network snapshot'].bus_P_mis, net.bus_P_mis, places=10)
+                        self.assertAlmostEqual(results['network snapshot'].bus_Q_mis, net.bus_Q_mis, places=10)
 
-                            try:
-                                busMP = netMP.get_bus_from_number(bus_num)
-                                bus = net.get_bus_from_number(bus_num)
-                            except pf.NetworkError:
-                                continue
+                        method.solve(netMP)
+                        resultsMP = method.get_results()
+                        self.assertEqual(resultsMP['solver status'],'solved')
+                        method.update_network(netMP)
 
-                            for t in range(T):
-                                v_mag_error.append(np.abs(busMP.v_mag[t]-v_mag))
-                                v_ang_error.append(np.abs(busMP.v_ang[t]*180./np.pi-v_ang))
-                            v_mag_error.append(np.abs(bus.v_mag-v_mag))
-                            v_ang_error.append(np.abs(bus.v_ang*180./np.pi-v_ang))
+                        self.assertLess(np.max(np.abs(netMP.bus_P_mis)), 1e-2) # MW
+                        self.assertLess(np.max(np.abs(netMP.bus_Q_mis)), 1e-2) # MVAr
 
-                            counter += 1
+                        self.assertLess(norm(resultsMP['network snapshot'].bus_P_mis-netMP.bus_P_mis,np.inf),1e-10)
+                        self.assertLess(norm(resultsMP['network snapshot'].bus_Q_mis-netMP.bus_Q_mis,np.inf),1e-10)
+                        self.assertLess(norm(resultsMP['network snapshot'].gen_P_cost-netMP.gen_P_cost,np.inf),1e-10)
 
-                        self.assertEqual(len(v_mag_error),len(v_ang_error))
-                        if len(v_mag_error) > 0:
-                            validated = 'validated'
-                            self.assertLessEqual(np.max(v_mag_error),v_mag_tol)
-                            self.assertLessEqual(np.max(v_ang_error),v_ang_tol)
-                        self.assertEqual(len(v_mag_error),counter*(T+1))
-                        self.assertEqual(len(v_ang_error),counter*(T+1))
+                        # Sol validation
+                        if sol_data is not None:
+
+                            v_mag_tol = sol_data['v_mag_tol']
+                            v_ang_tol = sol_data['v_ang_tol']
+                            bus_data = sol_data['bus_data']
+
+                            counter = 0
+                            v_mag_error = []
+                            v_ang_error = []
+                            for bus_num,val in list(bus_data.items()):
+
+                                v_mag = val['v_mag']
+                                v_ang = val['v_ang']
+
+                                try:
+                                    busMP = netMP.get_bus_from_number(bus_num)
+                                    bus = net.get_bus_from_number(bus_num)
+                                except pf.NetworkError:
+                                    continue
+
+                                for t in range(T):
+                                    v_mag_error.append(np.abs(busMP.v_mag[t]-v_mag))
+                                    v_ang_error.append(np.abs(busMP.v_ang[t]*180./np.pi-v_ang))
+                                v_mag_error.append(np.abs(bus.v_mag-v_mag))
+                                v_ang_error.append(np.abs(bus.v_ang*180./np.pi-v_ang))
+
+                                counter += 1
+
+                            self.assertEqual(len(v_mag_error),len(v_ang_error))
+                            if len(v_mag_error) > 0:
+                                validated = 'validated'
+                                self.assertLessEqual(np.max(v_mag_error),v_mag_tol)
+                                self.assertLessEqual(np.max(v_ang_error),v_ang_tol)
+                            self.assertEqual(len(v_mag_error),counter*(T+1))
+                            self.assertEqual(len(v_ang_error),counter*(T+1))
 
                     # Show
-                    print("\t%s\t%s\t%s\t%d\t%s" %(case.split(os.sep)[-1],
-                                                   sol_types[sol],
-                                                   solver,
-                                                   results['solver iterations'],
-                                                   validated))
+                    print("\t%s\t%s\t%s\t%s\t%d\t%s" %(
+                        case.split(os.sep)[-1],
+                        sol_types[sol],
+                        solver,
+                        results['solver status'],
+                        results['solver iterations'],
+                        validated))
 
     def test_ACOPF_solutions(self):
 
@@ -787,14 +805,15 @@ class TestPowerFlow(unittest.TestCase):
                 gen_P_cost = net.gen_P_cost
                 method_ipopt.solve(net)
                 has_ipopt = True
-                self.assertEqual(method_ipopt.results['solver status'],'solved')
+                s1 = method_ipopt.results['solver status']
+                self.assertEqual(s1, 'solved')
                 self.assertEqual(net.gen_P_cost,gen_P_cost)
                 self.assertNotEqual(method_ipopt.results['network snapshot'].gen_P_cost,gen_P_cost)
                 self.assertEqual(method_ipopt.results['solver name'], 'ipopt')
                 x1 = method_ipopt.get_results()['solver primal variables']
                 i1 = method_ipopt.get_results()['solver iterations']
                 p1 = method_ipopt.get_results()['network snapshot'].gen_P_cost
-                print("\t%s\t%s\t%d" %(case.split(os.sep)[-1],'ipopt',i1))
+                print("\t%s\t%s\t%s\t%d" %(case.split(os.sep)[-1], 'ipopt', s1, i1))
             except ImportError:
                 has_ipopt = False
 
@@ -802,27 +821,29 @@ class TestPowerFlow(unittest.TestCase):
             net.update_properties()
             gen_P_cost = net.gen_P_cost
             method_inlp.solve(net)
-            self.assertEqual(method_inlp.results['solver status'],'solved')
+            s2 = method_inlp.results['solver status']
+            self.assertEqual(s2,'solved')
             self.assertEqual(net.gen_P_cost,gen_P_cost)
             self.assertNotEqual(method_inlp.results['network snapshot'].gen_P_cost,gen_P_cost)
             self.assertEqual(method_inlp.results['solver name'], 'inlp')
             x2 = method_inlp.get_results()['solver primal variables']
             i2 = method_inlp.get_results()['solver iterations']
             p2 = method_inlp.get_results()['network snapshot'].gen_P_cost
-            print("\t%s\t%s\t%d" %(case.split(os.sep)[-1],'inlp',i2))
+            print("\t%s\t%s\t%s\t%d" %(case.split(os.sep)[-1], 'inlp', s2, i2))
 
             # AUGL
             net.update_properties()
             gen_P_cost = net.gen_P_cost
             method_augl.solve(net)
-            self.assertEqual(method_augl.results['solver status'],'solved')
+            s3 = method_augl.results['solver status']
+            self.assertEqual(s3, 'solved')
             self.assertEqual(net.gen_P_cost,gen_P_cost)
             self.assertNotEqual(method_augl.results['network snapshot'].gen_P_cost,gen_P_cost)
             self.assertEqual(method_augl.results['solver name'], 'augl')
             x3 = method_augl.get_results()['solver primal variables']
             i3 = method_augl.get_results()['solver iterations']
             p3 = method_augl.get_results()['network snapshot'].gen_P_cost
-            print("\t%s\t%s\t%d" %(case.split(os.sep)[-1],'augl',i3))
+            print("\t%s\t%s\t%s\t%d" %(case.split(os.sep)[-1], 'augl', s3, i3))
 
             # Checks
             if has_ipopt:
@@ -844,14 +865,16 @@ class TestPowerFlow(unittest.TestCase):
 
         infcases = ['ieee25.raw', 'ieee25.m', 'ieee25_mw.raw',
                     'ieee25_mvar_in.raw', 'ieee25_mvar_out.raw',
-                    'ieee25_mvar_out_limit.raw',
-                    'ieee25_wind.raw']
+                    'ieee25_mvar_out_limit.raw', 
+                    'ieee25_wind.raw', 'ieee25_zcor.raw']
 
         skipcases = ['case1354.mat','case2869.mat',
                      'case3375wp.mat','case9241.mat',
                      'ieee59_convert_to_zil_to_solve.raw']
 
         method = gopt.power_flow.new_method('DCOPF')
+
+        print('')
 
         for case in utils.test_cases:
 
@@ -882,9 +905,14 @@ class TestPowerFlow(unittest.TestCase):
                 self.assertTrue(np.all(method.results['network snapshot'].gen_P_cost != gen_P_cost))
             except gopt.power_flow.PFmethodError:
                 self.assertTrue(case.split(os.sep)[-1] in infcases)
-                self.assertEqual(method.results['solver status'],'error')
+                self.assertEqual(method.results['solver status'], 'error')
 
             results = method.get_results()
+            print("\t%s\t%s\t%s\t%d" %(
+                case.split(os.sep)[-1], 
+                results['solver name'], 
+                results['solver status'], 
+                results['solver iterations']))
 
             net = results['network snapshot']
 
