@@ -222,7 +222,7 @@ class ACPF(PFmethod):
                       'any',
                       'all')
 
-        # Loads
+        # Load
         if vdep_loads or convert_loads_2_zip:
             for load in net.loads:
                 if load.is_in_service():
@@ -235,7 +235,7 @@ class ACPF(PFmethod):
                                                    'variable',
                                                    ['active power', 'reactive power'])
 
-        # Tap changers
+        # Tap changer
         if tap_mode != self.CONTROL_MODE_LOCKED:
             net.set_flags('branch',
                           ['variable', 'fixed'],
@@ -245,13 +245,24 @@ class ACPF(PFmethod):
                           'variable',
                           'tap changer - Q',
                           'tap ratio')
+            if y_correction:
+                net.set_flags('branch', 
+                              'variable',
+                              'y correction - ratio', 
+                              'y scale') 
+
         
-        # Phase-shif flags
+        # Phase-shifters
         if phase_shift_mode != self.CONTROL_MODE_LOCKED:
             net.set_flags('branch',
                           'variable',
                           'phase shifter',
                           'phase shift')
+            if y_correction:
+                net.set_flags('branch', 
+                              'variable',
+                              'y correction - phase',
+                              'y scale')
 
         # Switched shunts
         if shunt_mode != self.CONTROL_MODE_LOCKED:
@@ -299,8 +310,8 @@ class ACPF(PFmethod):
             problem.add_constraint(pfnet.Constraint('switching transformer p regulation', net))
             problem.add_heuristic(pfnet.Heuristic('switching transformer p regulation', net))
 
-        if y_correction and tap_mode != self.CONTROL_MODE_LOCKED:
-            problem.add_heuristic(pfnet.Heuristic('admittance correction update', net))
+        if y_correction and (tap_mode != self.CONTROL_MODE_LOCKED or phase_shift_mode != self.CONTROL_MODE_LOCKED):
+            problem.add_constraint(pfnet.Constraint('y correction table', net))
 
         problem.analyze()
 
@@ -339,6 +350,7 @@ class ACPF(PFmethod):
         v_mag_warm_ref = params['v_mag_warm_ref']
         gens_redispatch = params['gens_redispatch']
         curtail_load_q = params['load_q_curtail']
+        y_correction = params['y_correction']
 
         # Check shunt options
         if shunt_mode not in [self.CONTROL_MODE_LOCKED,
@@ -487,6 +499,12 @@ class ACPF(PFmethod):
                             'bounded',
                             'tap changer - Q',
                             'tap ratio')
+            # Y correction
+            if y_correction:
+                net.set_flags('branch',
+                              'variable',
+                              'y correction - ratio',
+                              ['tap ratio', 'y scale'])
 
         # Trans phase-shifter mode
         if phase_shift_mode != self.CONTROL_MODE_LOCKED:
@@ -505,6 +523,12 @@ class ACPF(PFmethod):
                                   ['variable', 'bounded'],
                                   'asymmetric phase shifter',
                                   'ratio')
+            # Y correction
+            if y_correction:
+                net.set_flags('branch',
+                              'variable',
+                              'y correction - phase',
+                              ['phase shift', 'y scale'])
 
         # Switched shunts
         if shunt_mode != self.CONTROL_MODE_LOCKED:
@@ -575,6 +599,9 @@ class ACPF(PFmethod):
                 problem.add_function(pfnet.Function('transformer P regularization', wc/(net.get_num_phase_shifters(True)+1.), net))
                 if net.get_num_asymmetric_phase_shifters() > 0:
                     problem.add_constraint(pfnet.Constraint('asymmetric transformer equations', net))
+
+        if y_correction and (tap_mode != self.CONTROL_MODE_LOCKED or phase_shift_mode != self.CONTROL_MODE_LOCKED):
+            problem.add_constraint(pfnet.Constraint("y correction table", net))
 
         if shunt_mode != self.CONTROL_MODE_LOCKED:
             problem.add_function(pfnet.Function('susceptance regularization', wc/(net.get_num_switched_v_shunts(True)+1.), net))
