@@ -447,6 +447,7 @@ class TestPowerFlow(unittest.TestCase):
                          params['solver_parameters']['ipopt']['hessian_approximation'])
 
     def test_DCPF(self):
+        print('')
 
         for case in utils.test_cases:
 
@@ -1179,7 +1180,7 @@ class TestPowerFlow(unittest.TestCase):
         # Parameters
         if 'nr' in method_name.lower():
             settings = {'solver': 'nr',
-                        # 'quiet': False,
+                        'quiet': True,
                         'maxiter': 100,
                         'feastol': 1e-4,
                         'shunt_mode': 'regulating',
@@ -1192,7 +1193,7 @@ class TestPowerFlow(unittest.TestCase):
                         }
         else:
             settings = {'solver': 'augl', 
-                        # 'quiet': True,
+                        'quiet': True,
                         'maxiter': 100,
                         'feastol': 1e-4,
                         'tap_mode': 'regulating', 
