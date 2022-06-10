@@ -447,6 +447,7 @@ class TestPowerFlow(unittest.TestCase):
                          params['solver_parameters']['ipopt']['hessian_approximation'])
 
     def test_DCPF(self):
+        print('')
 
         for case in utils.test_cases:
 
@@ -1147,6 +1148,99 @@ class TestPowerFlow(unittest.TestCase):
         for gen in bus.generators:
             if gen.is_slack():
                 self.assertTrue(gen.is_redispatchable())
+    
+    def test_ACPF_with_inter_area_transfer(self):
+        self.run_test_ACPF_with_inter_area_transfer(method_name='nr')
+        self.run_test_ACPF_with_inter_area_transfer(method_name='opt')
+    
+    def run_test_ACPF_with_inter_area_transfer(self, method_name='opt'):
+
+        case = os.path.join('tests', 'resources', 'cases', 'case6_transfer.raw')
+
+        if not os.path.isfile(case):
+            raise unittest.SkipTest('file not available, skip testing inter-area transfer in {}'.format(method_name.upper()))
+
+        dm = datamodel.DataModel()
+        net = dm.parse(case,
+                       0,
+                       keep_all_out_of_service=True,
+                       round_tap_ratios=0,
+                       output_level=0,
+                       round_switched_shunts=0)
+
+        # Network
+        self.assertEqual(net.num_buses, 6)
+        self.assertEqual(net.get_num_areas(), 2)
+        self.assertEqual(net.get_num_transfers(), 1)
+
+        # Initial state
+        for transfer in net.transfers:
+            self.assertFalse(transfer.mw == transfer.mw_target)
+
+        # Parameters
+        if 'nr' in method_name.lower():
+            settings = {'solver': 'nr',
+                        'quiet': True,
+                        'maxiter': 100,
+                        'feastol': 1e-4,
+                        'shunt_mode': 'regulating',
+                        'tap_mode': 'regulating',
+                        'Q_limits': True,
+                        'P_transfer': True,
+                        'v_max_clip': 1.8,
+                        'v_min_clip': 0.5,
+                        'acc_factor': 0.5,
+                        }
+        else:
+            settings = {'solver': 'augl', 
+                        'quiet': True,
+                        'maxiter': 100,
+                        'feastol': 1e-4,
+                        'tap_mode': 'regulating', 
+                        'tap_limits': True,
+                        'shunt_mode': 'regulating', 
+                        'shunt_limits': True,
+                        'Q_limits': True,
+                        'Q_mode': 'regulating',
+                        'v_mag_warm_ref': False,
+                        'P_transfer': True,
+                        'weight_vmag': 1e0, 
+                        'weight_vang': 1e0, 
+                        'weight_powers': 1e0, 
+                        'weight_var': 1e0, 
+                        'weight_controls': 1.0,
+                        'v_limits': True,
+                        }
+
+        method = gopt.power_flow.ACPF()
+        method.set_parameters(settings)
+        method.solve(net, save_problem=True)
+        method.update_network(net)
+        result = method.get_results()
+        self.assertTrue(result['solver status'] == 'solved')
+
+        # transfer
+        for transfer in net.transfers:
+            self.assertAlmostEqual(transfer.mw, transfer.mw_target, 3)
+
+        # area interchange
+        sum_area_interchange = 0
+        for area in net.areas:
+            sum_area_interchange += area.mw_export
+            self.assertLessEqual(area.mw_export, area.mw_target + area.mw_tolerance)
+            self.assertGreaterEqual(area.mw_export, area.mw_target - area.mw_tolerance)
+        self.assertAlmostEqual(sum_area_interchange, 0, 8)
+
+        # area slack
+        for bus in net.get_area_slack_buses():
+            self.assertLessEqual(bus.generators[0].P, bus.generators[0].P_max)
+            self.assertGreaterEqual(bus.generators[0].P, bus.generators[0].P_min)
+            num_gens = len([g for g in bus.generators])
+            if num_gens > 1:
+                for i in range(1, num_gens):
+                    self.assertLessEqual(bus.generators[i].P, bus.generators[i].P_max)
+                    self.assertGreaterEqual(bus.generators[i].P, bus.generators[i].P_min)
+                    self.assertAlmostEqual(bus.generators[i].P, bus.generators[i].P, 8)
     
     def test_acpf_with_zip_loads(self):
 

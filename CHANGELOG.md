@@ -1,5 +1,7 @@
 Unreleased
 ----------
+* Added variables on Inter-Area Transfer.
+* Added constraints and heuristics on regulating inter-area transfer MW.
 * Added transformer P, Q control constraints and heuristics in NR.
 * Added transformer P, Q control functions in Opt-based ACPF.
 * Added phase shift varaibles for phase shifters.

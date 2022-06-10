@@ -34,7 +34,7 @@ class ACPF(PFmethod):
                    'weight_redispatch': 1e0, # weight for gen real power redispatch deviation penalty
                    'v_min_clip': 0.5,        # lower v threshold for clipping
                    'v_max_clip': 1.5,        # upper v threshold for clipping
-                   'v_limits': False,         # voltage magnitude limits (OPT only)
+                   'v_limits': False,        # voltage magnitude limits (OPT only)
                    'Q_limits': True,         # flag for enforcing generator, VSC and FACTS reactive power limits
                    'Q_mode': 'regulating',   # reactive power mode: free, regulating
                    'shunt_limits': True,     # flag for enforcing switched shunt susceptance limits
@@ -60,8 +60,10 @@ class ACPF(PFmethod):
                    'dsus': 1e-4,             # susceptance perturbation (NR only)
                    'y_correction': True,     # admittance correction (NR only)
                    'load_q_curtail': False,  # flag for allowing load Q to change (OPT only)
+                   'P_transfer': False,      # flag for enabling inter-area transfer or not
+                   'dsus': 1e-4,             # susceptance perturbation (NR only)
                    'v_min_2_ZIP': 0.85,      # minimum voltage threshold to convert loads to constant impedance
-                   'loads_2_ZIP': True}     # Flag to convert loads to constant impedance if the voltage drops below
+                   'loads_2_ZIP': True}      # Flag to convert loads to constant impedance if the voltage drops below
                                              # v_min_2_ZIP
 
     _parameters_augl = {'feastol': 1e-4,
@@ -131,6 +133,7 @@ class ACPF(PFmethod):
         lock_csc_i_dc = params['lock_csc_i_dc']
         vdep_loads = params['vdep_loads']
         gens_redispatch = params['gens_redispatch']
+        P_transfer = params['P_transfer']
         convert_loads_2_zip = params['loads_2_ZIP']
         y_correction = params['y_correction']
 
@@ -250,7 +253,6 @@ class ACPF(PFmethod):
                               'variable',
                               'y correction - ratio', 
                               'y scale') 
-
         
         # Phase-shifters
         if phase_shift_mode != self.CONTROL_MODE_LOCKED:
@@ -270,6 +272,13 @@ class ACPF(PFmethod):
                           ['variable', 'fixed'],
                           'switching - v',
                           'susceptance')
+
+        # Inter-area transfer
+        if P_transfer:
+            net.set_flags('transfer',
+                          'variable',
+                          'any',
+                          'all')
 
         # Set up problem
         problem = pfnet.Problem(net)
@@ -302,6 +311,10 @@ class ACPF(PFmethod):
             problem.add_heuristic(pfnet.Heuristic('PVPQ switching', net))
             problem.add_heuristic(pfnet.Heuristic('switching power factor regulation', net))
 
+        if P_transfer:
+            problem.add_constraint(pfnet.Constraint('switching area transfer regulation', net))
+            problem.add_heuristic(pfnet.Heuristic('switching area transfer regulation', net))
+        
         if tap_mode != self.CONTROL_MODE_LOCKED:
             problem.add_constraint(pfnet.Constraint('switching transformer q regulation', net))
             problem.add_heuristic(pfnet.Heuristic('switching transformer q regulation', net))
@@ -350,6 +363,7 @@ class ACPF(PFmethod):
         v_mag_warm_ref = params['v_mag_warm_ref']
         gens_redispatch = params['gens_redispatch']
         curtail_load_q = params['load_q_curtail']
+        P_transfer = params['P_transfer']
         y_correction = params['y_correction']
 
         # Check shunt options
@@ -542,6 +556,19 @@ class ACPF(PFmethod):
                           'switching - v',
                           'susceptance')
 
+        # Inter-area transfer
+        if P_transfer:
+            buses = net.get_area_slack_buses()
+            for bus in buses:
+                for gen in bus.generators:
+                    net.set_flags_of_component(gen,
+                                               'variable',
+                                               'active power')
+            net.set_flags('transfer',
+                          'variable',
+                          'any',
+                          'all')
+
         # Set up problem
         problem = pfnet.Problem(net)
 
@@ -610,6 +637,9 @@ class ACPF(PFmethod):
 
         if vdep_loads:
             problem.add_constraint(pfnet.Constraint('load voltage dependence', net))
+
+        if P_transfer:
+            problem.add_constraint(pfnet.Constraint('area transfer regulation', net))
 
         if net.num_bounded > 0:
             problem.add_constraint(pfnet.Constraint('variable bounds', net))
@@ -705,18 +735,8 @@ class ACPF(PFmethod):
                 s.problem.b = prob.b
 
         def c4(s):
-            """Admittance correction update"""
-            if (params['y_correction']):
-                prob = s.problem.wrapped_problem
-                prob.apply_heuristics(s.x)
-                s.func(s.x)
-                prob.update_lin()
-                s.problem.J = prob.J
-                s.problem.f = prob.f
-
-        def c5(s):
             net = s.problem.wrapped_problem.network
-            if s.problem.wrapped_problem.network.bus_v_min <= vmin_to_zip:
+            if np.min(s.problem.wrapped_problem.network.bus_v_min) <= vmin_to_zip:
                 for lod in net.loads:
                     if lod.is_in_service():
                         bus_v = s.get_primal_variables()[lod.bus.index_v_mag]
@@ -734,9 +754,8 @@ class ACPF(PFmethod):
             solver.add_callback(OptCallback(c1))
             solver.add_callback(OptCallback(c2))
             solver.add_callback(OptCallback(c3))
-            solver.add_callback(OptCallback(c4))
             if convert_loads_2_zip:
-                solver.add_callback(OptCallback(c5))
+                solver.add_callback(OptCallback(c4))
 
         # Termination
         def t1(s):
