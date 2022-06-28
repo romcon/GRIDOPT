@@ -438,11 +438,11 @@ class ACPF(PFmethod):
                       'variable',
                       'fixed power factor',
                       'reactive power')
-        if Q_mode == self.CONTROL_MODE_FREE and Q_limits:
-            net.set_flags('generator',
-                          'bounded',
-                          'regulator',
-                          'reactive power')
+        # if Q_mode == self.CONTROL_MODE_FREE and Q_limits:
+        net.set_flags('generator',
+                        'bounded',
+                        'regulator',
+                        'reactive power')
 
         # Loads
         if vdep_loads:
@@ -464,11 +464,11 @@ class ACPF(PFmethod):
                       'variable',
                       'any',
                       ['dc power', 'active power', 'reactive power'])
-        if Q_mode == self.CONTROL_MODE_FREE and Q_limits:
-            net.set_flags('vsc converter',
-                          'bounded',
-                          'any',
-                          'reactive power')
+        # if Q_mode == self.CONTROL_MODE_FREE and Q_limits:
+        net.set_flags('vsc converter',
+                        'bounded',
+                        'any',
+                        'reactive power')
 
         # CSC HVDC
         net.set_flags('csc converter',
@@ -487,11 +487,11 @@ class ACPF(PFmethod):
                       'variable',
                       'any',
                       'all')
-        if Q_mode == self.CONTROL_MODE_FREE and Q_limits:
-            net.set_flags('facts',
-                          'bounded',
-                          'any',
-                          'reactive power')
+        # if Q_mode == self.CONTROL_MODE_FREE and Q_limits:
+        net.set_flags('facts',
+                        'bounded',
+                        'any',
+                        'reactive power')
 
         # Trans tap mode
         if tap_mode != self.CONTROL_MODE_LOCKED:
@@ -608,8 +608,8 @@ class ACPF(PFmethod):
         if gens_redispatch:
             problem.add_function(pfnet.Function('generation redispatch penalty', wr/(net.get_num_generators(True)+1.), net))
 
-        if Q_mode == self.CONTROL_MODE_REG and Q_limits:
-            problem.add_constraint(pfnet.Constraint('voltage set point regulation', net))
+        # if Q_mode == self.CONTROL_MODE_REG and Q_limits:
+        #     problem.add_constraint(pfnet.Constraint('voltage set point regulation', net))
 
         if net.num_fixed > 0:
             problem.add_constraint(pfnet.Constraint('variable fixing', net))
