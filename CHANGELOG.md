@@ -12,6 +12,7 @@ Unreleased
 * Added `loads_2_ZIP` parameter for ACPF to convert loads to constant imepdance if voltage drops beloew threshold (default is False).
 * Adding admittance correction parameter `y_correction` and callback to ACPF Newton-Raphson only.
 * Added tap-changer rounding parameter `taps_round` that will round taps each step if tap-mode is regulating.
+* Moved targeted support to Python 3.10
 
 Verions 1.4.1
 -------------
