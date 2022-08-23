@@ -644,7 +644,7 @@ class TestPowerFlow(unittest.TestCase):
                     self.assertEqual(netMP.num_periods,T)
 
                     # Only small
-                    if net.num_buses > 2500:
+                    if net.num_buses > 1000:
                         continue
 
                     sol_file = utils.get_pf_solution_file(case, utils.DIR_PFSOL, sol)

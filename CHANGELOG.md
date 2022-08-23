@@ -13,6 +13,8 @@ Unreleased
 * Adding admittance correction parameter `y_correction` and callback to ACPF Newton-Raphson only.
 * Added tap-changer rounding parameter `taps_round` that will round taps each step if tap-mode is regulating.
 * Moved targeted support to Python 3.10
+* Move from nosetest to pytest
+* Add tox support for py37, py38, py39, py310
 
 Verions 1.4.1
 -------------
