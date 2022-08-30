@@ -12,6 +12,7 @@ import numpy as np
 from .method_error import *
 from .method import PFmethod
 from numpy.linalg import norm
+from collections.abc import Iterable
 
 
 class ACPF(PFmethod):
@@ -740,15 +741,27 @@ class ACPF(PFmethod):
                 for lod in net.loads:
                     if lod.is_in_service():
                         bus_v = s.get_primal_variables()[lod.bus.index_v_mag]
-                        if bus_v <= vmin_to_zip:
-                            # Move cp&ci to cg
-                            lod.comp_cg = lod.comp_cp + lod.comp_ci + lod.comp_cg
-                            lod.comp_cp = 0.0
-                            lod.comp_ci = 0.0
-                            # Move cq&cj to cb
-                            lod.comp_cb = lod.comp_cb - lod.comp_cq - lod.comp_cj
-                            lod.comp_cq = 0.0
-                            lod.comp_cj = 0.0
+                        if isinstance(bus_v, Iterable):
+                            i = np.argmin(bus_v)
+                            if bus_v[i] <= vmin_to_zip:
+                                # Move cp&ci to cg
+                                lod.comp_cg = lod.comp_cp[i] + lod.comp_ci[i] + lod.comp_cg
+                                lod.comp_cp = [0.0]*len(bus_v)
+                                lod.comp_ci = [0.0]*len(bus_v)
+                                # Move cq&cj to cb
+                                lod.comp_cb = lod.comp_cb - lod.comp_cq[i] - lod.comp_cj[i]
+                                lod.comp_cq = [0.0]*len(bus_v)
+                                lod.comp_cj = [0.0]*len(bus_v)
+                        else:
+                            if bus_v <= vmin_to_zip:
+                                # Move cp&ci to cg
+                                lod.comp_cg = lod.comp_cp + lod.comp_ci + lod.comp_cg
+                                lod.comp_cp = 0.0
+                                lod.comp_ci = 0.0
+                                # Move cq&cj to cb
+                                lod.comp_cb = lod.comp_cb - lod.comp_cq - lod.comp_cj
+                                lod.comp_cq = 0.0
+                                lod.comp_cj = 0.0
 
         if solver_name == 'nr':
             solver.add_callback(OptCallback(c1))

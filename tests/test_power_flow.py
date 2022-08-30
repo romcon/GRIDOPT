@@ -470,8 +470,42 @@ class TestPowerFlow(unittest.TestCase):
                 results['solver status']))
 
             self.assertEqual(results['solver status'], 'solved')
-            self.assertTrue(results['solver name'] in ['mumps','superlu'])
+            self.assertTrue(results['solver name'] in ['mumps', 'superlu', 'klu'])
             self.assertTrue(isinstance(results['network snapshot'], pf.Network))
+
+            try:
+                method.set_parameters({'solver': 'mumps'})
+                method.solve(net)
+                results = method.get_results()
+                print("\t%s\t%s\t%s" % (
+                    case.split(os.sep)[-1],
+                    results['solver name'],
+                    results['solver status']))
+            except PFmethodError:
+                pass
+
+            try:
+                method.set_parameters({'solver': 'umfpack'})
+                method.solve(net)
+                results = method.get_results()
+                print("\t%s\t%s\t%s" % (
+                    case.split(os.sep)[-1],
+                    results['solver name'],
+                    results['solver status']))
+            except PFmethodError:
+                pass
+
+            try:
+                method.set_parameters({'solver': 'klu'})
+                method.solve(net)
+                results = method.get_results()
+                print("\t%s\t%s\t%s" % (
+                    case.split(os.sep)[-1],
+                    results['solver name'],
+                    results['solver status']))
+            except PFmethodError:
+                pass
+
 
     def test_ACPF_with_gen_outages(self):
 
@@ -644,7 +678,7 @@ class TestPowerFlow(unittest.TestCase):
                     self.assertEqual(netMP.num_periods,T)
 
                     # Only small
-                    if net.num_buses > 2500:
+                    if net.num_buses > 1000:
                         continue
 
                     sol_file = utils.get_pf_solution_file(case, utils.DIR_PFSOL, sol)
