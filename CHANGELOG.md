@@ -15,6 +15,7 @@ Unreleased
 * Moved targeted support to Python 3.10
 * Move from nosetest to pytest
 * Add tox support for py37, py38, py39, py310
+* Added KLU for DCPF
 
 Verions 1.4.1
 -------------
