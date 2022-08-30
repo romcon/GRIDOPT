@@ -29,7 +29,8 @@ class DCPF(PFmethod):
 
         self._parameters = DCPF._parameters.copy()
         self._parameters['solver_parameters'] = {'superlu': {},
-                                                 'mumps': {}}
+                                                 'mumps': {},
+                                                 'klu': {}}
 
     def create_problem(self,net):
 
