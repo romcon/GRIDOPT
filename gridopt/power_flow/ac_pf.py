@@ -59,7 +59,7 @@ class ACPF(PFmethod):
                    'shunt_step': 0.5,        # susceptance acceleration factor (NR only)
                    'dtap': 1e-4,             # tap ratio perturbation (NR only)
                    'dsus': 1e-4,             # susceptance perturbation (NR only)
-                   'y_correction': True,     # admittance correction (NR only)
+                   'y_correction': True,     # admittance correction
                    'load_q_curtail': False,  # flag for allowing load Q to change (OPT only)
                    'P_transfer': False,      # flag for enabling inter-area transfer or not
                    'dsus': 1e-4,             # susceptance perturbation (NR only)
