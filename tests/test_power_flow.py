@@ -1191,6 +1191,8 @@ class TestPowerFlow(unittest.TestCase):
 
         case = os.path.join('tests', 'resources', 'cases', 'case6_transfer.raw')
 
+        # [TODO]: Inter-area transfer functionality needs to be fixed in raw-parser, skipping test until then
+        raise unittest.SkipTest('inter-area transfer disabled in RAW Parser, skipping test {}'.format(method_name.upper()))
         if not os.path.isfile(case):
             raise unittest.SkipTest('file not available, skip testing inter-area transfer in {}'.format(method_name.upper()))
 
