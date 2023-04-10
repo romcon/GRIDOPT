@@ -267,13 +267,6 @@ class ACPF(PFmethod):
                               'y correction - phase',
                               'y scale')
 
-        # Switched shunts
-        if shunt_mode != self.CONTROL_MODE_LOCKED:
-            net.set_flags('shunt',
-                          ['variable', 'fixed'],
-                          'switching - v',
-                          'susceptance')
-
         # Inter-area transfer
         if P_transfer:
             net.set_flags('transfer',
@@ -720,12 +713,89 @@ class ACPF(PFmethod):
                 
         def c2(s):
             """Apply Shunt Voltage Regulation"""
-            if (s.k != 0 and params['shunt_limits'] and shunt_mode == self.CONTROL_MODE_REG and
-                norm(s.problem.f, np.inf) < 100.*solver_params['nr']['feastol']):
-                try:
-                    self.apply_shunt_v_regulation(s)
-                except Exception as e:
-                    raise PFmethodError_ShuntVReg(e)
+            if (s.k != 0 and
+                    params['shunt_limits'] and
+                    shunt_mode == self.CONTROL_MODE_REG and
+                    solver.get_status() == 'solved'):
+
+                out = 0
+                c2net = s.problem.wrapped_problem.network
+                for bus in c2net.buses:
+                    if not bus.is_in_service() or len(bus.reg_shunts) == 0:
+                        continue
+
+                    if bus.v_max_reg == bus.v_min_reg:
+                        continue  # Will cause oscillations
+
+                    # Update target
+                    reg_shunts = [sh for sh in bus.reg_shunts if sh.is_switched_v() and sh.is_in_service()]
+
+                    if len(reg_shunts) == 0:
+                        continue
+
+                    bus_v = s.get_primal_variables()[bus.index_v_mag]
+
+                    if bus.v_max_reg >= bus_v >= bus.v_min_reg:
+                        continue  # No Control needed
+
+                    reactors_on = any([sh.b < 0. for sh in reg_shunts])
+                    caps_on = any([sh.b > 0. for sh in reg_shunts])
+                    if bus_v > bus.v_max_reg:
+                        assigned_b = False
+                        if caps_on:
+                            # Turn off caps first
+                            for sh in reg_shunts:
+                                if sh.b > 0.:
+                                    # Move one step down
+                                    idx = max(np.argmin(np.abs(sh.b - sh.b_values)) - 1, 0)
+                                    sh.b = sh.b_values[idx]
+                                    assigned_b = True
+                                    out += 1
+                                    break
+
+                        if assigned_b:
+                            continue
+
+                        # Turn on Reactors
+                        for sh in reg_shunts:
+                            # Move one step down
+                            idx = max(np.argmin(np.abs(sh.b - sh.b_values)) - 1, 0)
+                            if idx == 0:
+                                continue  # Already at min
+
+                            sh.b = sh.b_values[idx]
+                            out += 1
+                            break
+
+                    elif bus_v < bus.v_min_reg:
+                        assigned_b = False
+                        if reactors_on:
+                            # Turn off Reactors first
+                            for sh in reg_shunts:
+                                if sh.b < 0.:
+                                    # Move one step up
+                                    idx = min(np.argmin(np.abs(sh.b - sh.b_values)) + 1, sh.b_values.__len__() - 1)
+                                    sh.b = sh.b_values[idx]
+                                    out += 1
+                                    assigned_b = True
+                                    break
+
+                        if assigned_b:
+                            continue
+
+                        # Turn on caps
+                        for sh in reg_shunts:
+                            # Move one step down
+                            idx = min(np.argmin(np.abs(sh.b - sh.b_values)) + 1, sh.b_values.__len__() - 1)
+                            if idx == sh.b_values.__len__() - 1:
+                                continue  # Already at max
+
+                            sh.b = sh.b_values[idx]
+                            out += 1
+                            break
+
+                # Output
+                s.num_reg = out
 
         def c3(s):
             """PV-PQ start at given iteration"""
@@ -736,9 +806,9 @@ class ACPF(PFmethod):
                 s.problem.b = prob.b
 
         def c4(s):
-            net = s.problem.wrapped_problem.network
             if np.min(s.problem.wrapped_problem.network.bus_v_min) <= vmin_to_zip:
-                for lod in net.loads:
+                c4net = s.problem.wrapped_problem.network
+                for lod in c4net.loads:
                     if lod.is_in_service():
                         bus_v = s.get_primal_variables()[lod.bus.index_v_mag]
                         if isinstance(bus_v, Iterable):
