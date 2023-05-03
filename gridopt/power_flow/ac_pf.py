@@ -649,10 +649,14 @@ class ACPF(PFmethod):
         params = self._parameters
         v_min_clip = params['v_min_clip']
         v_max_clip = params['v_max_clip']
+        shunt_mode = params['shunt_mode']
 
         if not update_net:
             # Copy network
             net = net.get_copy(merge_buses=True)
+
+        if shunt_mode != self.CONTROL_MODE_LOCKED:
+            net.round_discrete_switched_shunts_b()
 
         # Clipping
         for bus in net.buses:
