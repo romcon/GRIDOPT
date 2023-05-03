@@ -699,6 +699,12 @@ class ACPF(PFmethod):
             raise PFmethodError_BadOptSolver()
         solver.set_parameters(solver_params[solver_name])
 
+        shunt_actions = {sh.uid: [0, 0, sh.b] for sh in net.shunts if sh.is_in_service() and sh.is_switched_v()}
+        sh_reg_buses = [bus for bus in net.buses
+                        if bus.is_in_service() and
+                        len(bus.reg_shunts) > 0 and
+                        bus.v_max_reg > bus.v_min_reg and
+                        len([sh for sh in bus.reg_shunts if sh.is_switched_v() and sh.is_in_service()]) > 0]
         # Callbacks
         def c1(s):
             """Apply Transformer Voltage Regulation"""
@@ -720,11 +726,11 @@ class ACPF(PFmethod):
 
                 out = 0
                 c2net = s.problem.wrapped_problem.network
-                for bus in c2net.buses:
+                for bus in sh_reg_buses:   # c2net.buses:
                     if not bus.is_in_service() or len(bus.reg_shunts) == 0:
                         continue
 
-                    if bus.v_max_reg == bus.v_min_reg:
+                    if bus.v_max_reg <= bus.v_min_reg:
                         continue  # Will cause oscillations
 
                     # Update target
@@ -736,6 +742,14 @@ class ACPF(PFmethod):
                     bus_v = s.get_primal_variables()[bus.index_v_mag]
 
                     if bus.v_max_reg >= bus_v >= bus.v_min_reg:
+                        if s.swsh_call == 1:
+                            # approximate continuous shunts (only once to avoid oscillations)
+                            for sh in reg_shunts:
+                                if sh.is_continuous():
+                                    sh.b = ((sh.b_max - sh.b_min) / (sh.reg_bus.v_min_reg - sh.reg_bus.v_max_reg) * (
+                                                bus_v - sh.reg_bus.v_max_reg))
+                                out += 1
+
                         continue  # No Control needed
 
                     reactors_on = any([sh.b < 0. for sh in reg_shunts])
@@ -745,12 +759,16 @@ class ACPF(PFmethod):
                         if caps_on:
                             # Turn off caps first
                             for sh in reg_shunts:
+                                if s.swsh_call >= 3:
+                                    if shunt_actions[sh.uid][0] > 0 and shunt_actions[sh.uid][1] > 0:
+                                        continue
                                 if sh.b > 0.:
                                     # Move one step down
                                     idx = max(np.argmin(np.abs(sh.b - sh.b_values)) - 1, 0)
                                     sh.b = sh.b_values[idx]
                                     assigned_b = True
                                     out += 1
+                                    shunt_actions[sh.uid][0] += 1
                                     break
 
                         if assigned_b:
@@ -758,13 +776,24 @@ class ACPF(PFmethod):
 
                         # Turn on Reactors
                         for sh in reg_shunts:
+                            if s.swsh_call >= 3:
+                                if shunt_actions[sh.uid][0] > 0 and shunt_actions[sh.uid][1] > 0:
+                                    continue
                             # Move one step down
-                            idx = max(np.argmin(np.abs(sh.b - sh.b_values)) - 1, 0)
+                            idx = np.argmin(np.abs(sh.b - sh.b_values))
                             if idx == 0:
-                                continue  # Already at min
+                                if abs(sh.b - sh.b_min) <= 1e-6:
+                                    continue  # Already at min
+                                else:
+                                    sh.b = sh.b_min   # Round and consider as one step
+                                    out += 1
+                                    shunt_actions[sh.uid][0] += 1
+                                    break
 
+                            idx = max(idx - 1, 0)   # move one step down
                             sh.b = sh.b_values[idx]
                             out += 1
+                            shunt_actions[sh.uid][0] += 1
                             break
 
                     elif bus_v < bus.v_min_reg:
@@ -772,12 +801,16 @@ class ACPF(PFmethod):
                         if reactors_on:
                             # Turn off Reactors first
                             for sh in reg_shunts:
+                                if s.swsh_call >= 3:
+                                    if shunt_actions[sh.uid][0] > 0 and shunt_actions[sh.uid][1] > 0:
+                                        continue
                                 if sh.b < 0.:
                                     # Move one step up
                                     idx = min(np.argmin(np.abs(sh.b - sh.b_values)) + 1, sh.b_values.__len__() - 1)
                                     sh.b = sh.b_values[idx]
                                     out += 1
                                     assigned_b = True
+                                    shunt_actions[sh.uid][1] += 1
                                     break
 
                         if assigned_b:
@@ -785,14 +818,57 @@ class ACPF(PFmethod):
 
                         # Turn on caps
                         for sh in reg_shunts:
-                            # Move one step down
-                            idx = min(np.argmin(np.abs(sh.b - sh.b_values)) + 1, sh.b_values.__len__() - 1)
+                            if s.swsh_call >= 3:
+                                if shunt_actions[sh.uid][0] > 0 and shunt_actions[sh.uid][1] > 0:
+                                    continue
+                            # Move one step up
+                            idx = np.argmin(np.abs(sh.b - sh.b_values))
                             if idx == sh.b_values.__len__() - 1:
-                                continue  # Already at max
+                                if abs(sh.b - sh.b_max) <= 1e-6:
+                                    continue  # Already at max
+                                else:
+                                    sh.b = sh.b_max   # Round and consider as one step
+                                    out += 1
+                                    shunt_actions[sh.uid][1] += 1
+                                    break
 
+                            idx = min(idx + 1, sh.b_values.__len__() - 1)
                             sh.b = sh.b_values[idx]
                             out += 1
+                            shunt_actions[sh.uid][1] += 1
                             break
+
+                if not quiet:
+                    _print_swsh_adj = False
+                    for uid in shunt_actions.keys():
+                        sh = c2net.get_shunt_from_uid(uid)
+                        if sh.b != shunt_actions[uid][2] and shunt_actions[uid][0] + shunt_actions[uid][1] > 0:
+                            if not _print_swsh_adj:
+                                print("\nSWITCHED SHUNTS ADJUSTED:")
+                                print(" X----------- AT BUS ----------X    OLD Q    NEW Q")
+                                _print_swsh_adj = True
+
+                            print("{:^12} [{:^18s}] {:^8.2f} {:^8.2f}".format(sh.bus.number,
+                                                                              sh.bus.name,
+                                                                              shunt_actions[uid][2] * c2net.base_power,
+                                                                              sh.b * c2net.base_power))
+
+                    if _print_swsh_adj:
+                        print('\n', end='')
+                    _print_swsh_adj = False
+                    for uid in shunt_actions.keys():
+                        sh = c2net.get_shunt_from_uid(uid)
+                        if s.swsh_call >= 3 and shunt_actions[uid][0] > 0 and shunt_actions[uid][1] > 0:
+                            if not _print_swsh_adj:
+                                print("\nSWITCHED SHUNTS LOCKED DUE TO OSCILLATIONS:")
+                                print(" X----------- AT BUS ----------X     Q ")
+                                _print_swsh_adj = True
+
+                            print("{:^12} [{:^18s}] {:^8.2f}".format(sh.bus.number,
+                                                                     sh.bus.name,
+                                                                     sh.b * c2net.base_power))
+                    if _print_swsh_adj:
+                        print('\n', end='')
 
                 # Output
                 s.num_reg = out
