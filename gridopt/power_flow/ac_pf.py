@@ -24,6 +24,7 @@ class ACPF(PFmethod):
     CONTROL_MODE_FREE = 'free'
     CONTROL_MODE_REG = 'regulating'
     CONTROL_MODE_DISC = 'discrete'
+    SWSH_CYCLE_LIMIT = 3
 
     name = 'ACPF'
 
@@ -709,9 +710,21 @@ class ACPF(PFmethod):
                         len(bus.reg_shunts) > 0 and
                         bus.v_max_reg > bus.v_min_reg and
                         len([sh for sh in bus.reg_shunts if sh.is_switched_v() and sh.is_in_service()]) > 0]
+
+        locked_shunts = set()
+
+        def shunt_is_oscillating(uid):
+            return (shunt_actions[uid][0] + shunt_actions[uid][1] >= self.SWSH_CYCLE_LIMIT and
+                    shunt_actions[uid][0] > 0 and  # number of switching off (reactors)
+                    shunt_actions[uid][1] > 0 and  # number of switching on (capacitors)
+                    abs(shunt_actions[uid][0] - shunt_actions[uid][1]) <= 0.5 * self.SWSH_CYCLE_LIMIT
+                    )
+
         # Callbacks
         def c1(s):
             """Apply Transformer Voltage Regulation"""
+            if s.get_status() == 'solved':
+                return
             if (s.k != 0 and params['tap_limits'] and tap_mode == self.CONTROL_MODE_REG and
                 norm(s.problem.f, np.inf) < 100.*solver_params['nr']['feastol']):
                 try:
@@ -726,10 +739,12 @@ class ACPF(PFmethod):
             if (s.k != 0 and
                     params['shunt_limits'] and
                     shunt_mode == self.CONTROL_MODE_REG and
-                    solver.get_status() == 'solved'):
+                    s.get_status() == 'solved'):
 
-                out = 0
+                total_swsh_actions = 0
+                swsh_actions = []
                 c2net = s.problem.wrapped_problem.network
+                xhat = s.get_primal_variables()
                 for bus in sh_reg_buses:   # c2net.buses:
                     if not bus.is_in_service() or len(bus.reg_shunts) == 0:
                         continue
@@ -743,7 +758,7 @@ class ACPF(PFmethod):
                     if len(reg_shunts) == 0:
                         continue
 
-                    bus_v = s.get_primal_variables()[bus.index_v_mag]
+                    bus_v = xhat[bus.index_v_mag]
 
                     if bus.v_max_reg >= bus_v >= bus.v_min_reg:
                         if s.swsh_call == 1:
@@ -752,7 +767,7 @@ class ACPF(PFmethod):
                                 if sh.is_continuous():
                                     sh.b = ((sh.b_max - sh.b_min) / (sh.reg_bus.v_min_reg - sh.reg_bus.v_max_reg) * (
                                                 bus_v - sh.reg_bus.v_max_reg))
-                                out += 1
+                                    total_swsh_actions += 1
 
                         continue  # No Control needed
 
@@ -763,15 +778,16 @@ class ACPF(PFmethod):
                         if caps_on:
                             # Turn off caps first
                             for sh in reg_shunts:
-                                if s.swsh_call >= 3:
-                                    if shunt_actions[sh.uid][0] > 0 and shunt_actions[sh.uid][1] > 0:
+                                if s.swsh_call >= self.SWSH_CYCLE_LIMIT:
+                                    if shunt_is_oscillating(sh.uid):
                                         continue
                                 if sh.b > 0.:
                                     # Move one step down
                                     idx = max(np.argmin(np.abs(sh.b - sh.b_values)) - 1, 0)
+                                    swsh_actions.append([sh.uid, sh.b])
                                     sh.b = sh.b_values[idx]
                                     assigned_b = True
-                                    out += 1
+                                    total_swsh_actions += 1
                                     shunt_actions[sh.uid][0] += 1
                                     break
 
@@ -780,8 +796,8 @@ class ACPF(PFmethod):
 
                         # Turn on Reactors
                         for sh in reg_shunts:
-                            if s.swsh_call >= 3:
-                                if shunt_actions[sh.uid][0] > 0 and shunt_actions[sh.uid][1] > 0:
+                            if s.swsh_call >= self.SWSH_CYCLE_LIMIT:
+                                if shunt_is_oscillating(sh.uid):
                                     continue
                             # Move one step down
                             idx = np.argmin(np.abs(sh.b - sh.b_values))
@@ -789,14 +805,16 @@ class ACPF(PFmethod):
                                 if abs(sh.b - sh.b_min) <= 1e-6:
                                     continue  # Already at min
                                 else:
+                                    swsh_actions.append([sh.uid, sh.b])
                                     sh.b = sh.b_min   # Round and consider as one step
-                                    out += 1
+                                    total_swsh_actions += 1
                                     shunt_actions[sh.uid][0] += 1
                                     break
 
                             idx = max(idx - 1, 0)   # move one step down
+                            swsh_actions.append([sh.uid, sh.b])
                             sh.b = sh.b_values[idx]
-                            out += 1
+                            total_swsh_actions += 1
                             shunt_actions[sh.uid][0] += 1
                             break
 
@@ -805,14 +823,15 @@ class ACPF(PFmethod):
                         if reactors_on:
                             # Turn off Reactors first
                             for sh in reg_shunts:
-                                if s.swsh_call >= 3:
-                                    if shunt_actions[sh.uid][0] > 0 and shunt_actions[sh.uid][1] > 0:
+                                if s.swsh_call >= self.SWSH_CYCLE_LIMIT:
+                                    if shunt_is_oscillating(sh.uid):
                                         continue
                                 if sh.b < 0.:
                                     # Move one step up
                                     idx = min(np.argmin(np.abs(sh.b - sh.b_values)) + 1, sh.b_values.__len__() - 1)
+                                    swsh_actions.append([sh.uid, sh.b])
                                     sh.b = sh.b_values[idx]
-                                    out += 1
+                                    total_swsh_actions += 1
                                     assigned_b = True
                                     shunt_actions[sh.uid][1] += 1
                                     break
@@ -822,8 +841,8 @@ class ACPF(PFmethod):
 
                         # Turn on caps
                         for sh in reg_shunts:
-                            if s.swsh_call >= 3:
-                                if shunt_actions[sh.uid][0] > 0 and shunt_actions[sh.uid][1] > 0:
+                            if s.swsh_call >= self.SWSH_CYCLE_LIMIT:
+                                if shunt_is_oscillating(sh.uid):
                                     continue
                             # Move one step up
                             idx = np.argmin(np.abs(sh.b - sh.b_values))
@@ -831,38 +850,43 @@ class ACPF(PFmethod):
                                 if abs(sh.b - sh.b_max) <= 1e-6:
                                     continue  # Already at max
                                 else:
+                                    swsh_actions.append([sh.uid, sh.b])
                                     sh.b = sh.b_max   # Round and consider as one step
-                                    out += 1
+                                    total_swsh_actions += 1
                                     shunt_actions[sh.uid][1] += 1
                                     break
 
                             idx = min(idx + 1, sh.b_values.__len__() - 1)
+                            swsh_actions.append([sh.uid, sh.b])
                             sh.b = sh.b_values[idx]
-                            out += 1
+                            total_swsh_actions += 1
                             shunt_actions[sh.uid][1] += 1
                             break
 
                 if not quiet:
                     _print_swsh_adj = False
-                    for uid in shunt_actions.keys():
+                    for row in swsh_actions:
+                        uid = row[0]
                         sh = c2net.get_shunt_from_uid(uid)
-                        if sh.b != shunt_actions[uid][2] and shunt_actions[uid][0] + shunt_actions[uid][1] > 0:
-                            if not _print_swsh_adj:
-                                print("\nSWITCHED SHUNTS ADJUSTED:")
-                                print(" X----------- AT BUS ----------X    OLD Q    NEW Q")
-                                _print_swsh_adj = True
+                        if not _print_swsh_adj:
+                            print("\nSWITCHED SHUNTS ADJUSTED:")
+                            print(" X----------- AT BUS ----------X    OLD Q    NEW Q")
+                            _print_swsh_adj = True
 
-                            print("{:^12} [{:^18s}] {:^8.2f} {:^8.2f}".format(sh.bus.number,
-                                                                              sh.bus.name,
-                                                                              shunt_actions[uid][2] * c2net.base_power,
-                                                                              sh.b * c2net.base_power))
+                        print("{:^12} [{:^18s}] {:^8.2f} {:^8.2f}".format(sh.bus.number,
+                                                                          sh.bus.name,
+                                                                          row[1] * c2net.base_power,
+                                                                          sh.b * c2net.base_power))
 
                     if _print_swsh_adj:
                         print('\n', end='')
                     _print_swsh_adj = False
                     for uid in shunt_actions.keys():
                         sh = c2net.get_shunt_from_uid(uid)
-                        if s.swsh_call >= 3 and shunt_actions[uid][0] > 0 and shunt_actions[uid][1] > 0:
+                        if uid in locked_shunts:
+                            continue
+                        if s.swsh_call >= self.SWSH_CYCLE_LIMIT and shunt_is_oscillating(sh.uid):
+                            locked_shunts.add(uid)
                             if not _print_swsh_adj:
                                 print("\nSWITCHED SHUNTS LOCKED DUE TO OSCILLATIONS:")
                                 print(" X----------- AT BUS ----------X     Q ")
@@ -875,17 +899,21 @@ class ACPF(PFmethod):
                         print('\n', end='')
 
                 # Output
-                s.num_reg = out
+                s.num_reg = total_swsh_actions
 
         def c3(s):
             """PV-PQ start at given iteration"""
-            if (s.k >= params['pvpq_start_k'] and params['Q_limits'] and Q_mode == self.CONTROL_MODE_REG):
+            if s.get_status() == 'solved':
+                return
+            if s.k >= params['pvpq_start_k'] and params['Q_limits'] and Q_mode == self.CONTROL_MODE_REG:
                 prob = s.problem.wrapped_problem
                 prob.apply_heuristics(s.x)
                 s.problem.A = prob.A
                 s.problem.b = prob.b
 
         def c4(s):
+            if s.get_status() == 'solved':
+                return
             if np.min(s.problem.wrapped_problem.network.bus_v_min) <= vmin_to_zip:
                 c4net = s.problem.wrapped_problem.network
                 for lod in c4net.loads:

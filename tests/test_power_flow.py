@@ -1760,7 +1760,30 @@ class TestPowerFlow(unittest.TestCase):
         qopt = np.array([g.Q for g in net_opt.generators])
         self.assertLessEqual(vL2, 1e-4)
         self.assertLessEqual(sum(qnr)-sum(qopt), 1e-4)
-        
+
+    def test_ACPF_SWSH_HEUR(self):
+        import gridopt
+        import json
+        case = os.path.join('tests', 'resources', 'cases', 'ACTIVSg10k.raw')
+        if not os.path.isfile(case):
+            raise unittest.SkipTest('file not available')
+
+        dm = datamodel.DataModel()
+        net = dm.parse(case)
+        method = gridopt.power_flow.new_method('ACPF')
+        method.set_parameters({'quiet': True, 'shunt_mode': 'regulating', 'feastol': 0.001})
+        method.solve(net)
+        method.update_network(net)
+
+        res_file = os.path.join('tests', 'resources', 'pf_solutions', 'results_sw.json')
+        with open(res_file, 'r') as fo:
+            data = json.load(fo)
+
+        for k, v in data.items():
+            bus = net.get_bus_from_number(int(k))
+            self.assertTrue(abs(bus.v_mag - v[0]) <= 1e-3)
+            self.assertTrue(abs(bus.shunts[0].b * net.base_power - v[1]) <= 1e-1)
+
     def tearDown(self):
 
         pass
