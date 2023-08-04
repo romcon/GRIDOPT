@@ -16,6 +16,7 @@ Unreleased
 * Move from nosetest to pytest
 * Add tox support for py37, py38, py39, py310
 * Added KLU for DCPF
+* Changed the switched shunt ACPF from the band regulation using PFNET to a callback function that mimics PSSE that includes switched shunt operation limit check to control for oscillations.
 
 Verions 1.4.1
 -------------
