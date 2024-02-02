@@ -1916,7 +1916,7 @@ class TestPowerFlow(unittest.TestCase):
                 self.assertFalse(g.is_regulator())
                 self.assertEqual(g.Q_max, g.Q_min)
                 pf = g.fixed_power_factor
-                self.assertEqual(g.Q_max, g.P * np.sqrt(1 - pf * pf) / pf)
+                self.assertAlmostEqual(g.Q_max, g.P * np.sqrt(1 - pf * pf) / pf, 8)
             elif g.bus.number == 102:
                 self.assertFalse(g.is_machine_with_fixed_power_factor())
                 self.assertTrue(g.is_machine_with_power_factor_Q_limits())
@@ -1924,7 +1924,7 @@ class TestPowerFlow(unittest.TestCase):
                 self.assertTrue(g.is_regulator())
                 self.assertEqual(g.Q_max, -g.Q_min)
                 pf = g.fixed_power_factor
-                self.assertEqual(abs(g.Q_max), abs(g.P * np.sqrt(1 - pf * pf) / pf))
+                self.assertAlmostEqual(abs(g.Q_max), abs(g.P * np.sqrt(1 - pf * pf) / pf), 8)
             elif g.bus.number == 107:
                 self.assertFalse(g.is_machine_with_fixed_power_factor())
                 self.assertFalse(g.is_machine_with_power_factor_Q_limits())
