@@ -163,7 +163,7 @@ class ACOPF(PFmethod):
         solver.set_parameters(solver_params[solver_name])
 
         # Copy network
-        net = net.get_copy(merge_buses=True)
+        net = net.get_copy()
         self.set_network_snapshot(net)
         
         # Problem

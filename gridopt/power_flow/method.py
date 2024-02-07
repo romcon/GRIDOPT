@@ -290,5 +290,5 @@ class PFmethod:
         """
 
         if self.results['network snapshot'] is not None:
-            net.copy_from_network(self.results['network snapshot'], merged=True)
+            net.copy_from_network(self.results['network snapshot'])
             net.update_properties()

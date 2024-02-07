@@ -654,7 +654,7 @@ class ACPF(PFmethod):
 
         if not update_net:
             # Copy network
-            net = net.get_copy(merge_buses=True)
+            net = net.get_copy()
 
         if shunt_mode != self.CONTROL_MODE_LOCKED:
             net.round_discrete_switched_shunts_b()
