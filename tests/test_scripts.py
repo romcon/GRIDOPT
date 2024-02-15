@@ -10,7 +10,6 @@ from __future__ import print_function
 import os
 import pfnet
 import unittest
-import numpy as np
 import gridopt as gopt
 
 class TestScripts(unittest.TestCase):

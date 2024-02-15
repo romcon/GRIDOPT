@@ -12,6 +12,7 @@ import numpy as np
 from .method_error import *
 from .method import PFmethod
 from numpy.linalg import norm
+from collections.abc import Iterable
 
 
 class ACPF(PFmethod):
@@ -22,6 +23,8 @@ class ACPF(PFmethod):
     CONTROL_MODE_LOCKED = 'locked'
     CONTROL_MODE_FREE = 'free'
     CONTROL_MODE_REG = 'regulating'
+    CONTROL_MODE_DISC = 'discrete'
+    SWSH_CYCLE_LIMIT = 3
 
     name = 'ACPF'
 
@@ -33,13 +36,15 @@ class ACPF(PFmethod):
                    'weight_redispatch': 1e0, # weight for gen real power redispatch deviation penalty
                    'v_min_clip': 0.5,        # lower v threshold for clipping
                    'v_max_clip': 1.5,        # upper v threshold for clipping
-                   'v_limits': False,        # voltage magnitude limits
+                   'v_limits': False,        # voltage magnitude limits (OPT only)
                    'Q_limits': True,         # flag for enforcing generator, VSC and FACTS reactive power limits
                    'Q_mode': 'regulating',   # reactive power mode: free, regulating
                    'shunt_limits': True,     # flag for enforcing switched shunt susceptance limits
                    'shunt_mode': 'locked',   # switched shunts mode: locked, free, regulating
                    'tap_limits': True,       # flag for enforcing transformer tap ratio limits
                    'tap_mode': 'locked',     # transformer tap ratio mode: locked, free, regulating
+                   'phase_shift_limits': True,      # flag for enforcing transformer tap ratio limits
+                   'phase_shift_mode': 'locked',    # transformer phase-shift mode: locked, free, regulating
                    'lock_vsc_P_dc': True,    # flag for locking vsc P dc
                    'lock_csc_P_dc': True,    # flag for locking csc P dc
                    'lock_csc_i_dc': True,    # flag for locking csc i dc
@@ -47,26 +52,32 @@ class ACPF(PFmethod):
                    'pvpq_start_k': 0,        # start iteration number for PVPQ switching heuristics
                    'vmin_thresh': 0.1,       # minimum voltage magnitude threshold
                    'gens_redispatch': False, # flag for allowing active power redispatch
-                   'shunts_round': True,     # flag for rounding discrete switched shunt susceptances (not supported yet)
-                   'taps_round': True,       # flag for rounding discrete transformer tap ratios (not supported yet)
+                #    'shunts_round': False,     # flag for rounding discrete switched shunt susceptances (not supported yet)
+                   'taps_round': False,      # flag for rounding discrete transformer tap ratios (NR only)
                    'v_mag_warm_ref': False,  # flag for using current v_mag as reference in v_mag regularization
                    'solver': 'nr',           # OPTALG optimization solver: augl, ipopt, nr, inlp
                    'tap_step': 0.5,          # tap ratio acceleration factor (NR only)
                    'shunt_step': 0.5,        # susceptance acceleration factor (NR only)
                    'dtap': 1e-4,             # tap ratio perturbation (NR only)
+                   'dsus': 1e-4,             # susceptance perturbation (NR only)
+                   'y_correction': True,     # admittance correction
                    'load_q_curtail': False,  # flag for allowing load Q to change (OPT only)
-                   'dsus': 1e-4}             # susceptance perturbation (NR only)
+                   'P_transfer': False,      # flag for enabling inter-area transfer or not
+                   'dsus': 1e-4,             # susceptance perturbation (NR only)
+                   'v_min_2_ZIP': 0.85,      # minimum voltage threshold to convert loads to constant impedance
+                   'loads_2_ZIP': True}      # Flag to convert loads to constant impedance if the voltage drops below
+                                             # v_min_2_ZIP
 
-    _parameters_augl = {'feastol' : 1e-4,
-                        'optol' : 1e0,
-                        'kappa' : 1e-5,
+    _parameters_augl = {'feastol': 1e-4,
+                        'optol': 1e0,
+                        'kappa': 1e-5,
                         'theta_max': 1e-6,
                         'sigma_init_max': 1e9}
 
     _parameters_ipopt = {}
 
-    _parameters_inlp = {'feastol' : 1e-4,
-                        'optol' : 1e0}
+    _parameters_inlp = {'feastol': 1e-4,
+                        'optol': 1e0}
 
     _parameters_nr = {}
 
@@ -117,25 +128,37 @@ class ACPF(PFmethod):
         shunt_limits = params['shunt_limits']
         tap_mode = params['tap_mode']
         tap_limits = params['tap_limits']
+        phase_shift_mode = params['phase_shift_mode']
+        phase_shift_limits = params['phase_shift_limits']
         lock_vsc_P_dc = params['lock_vsc_P_dc']
         lock_csc_P_dc = params['lock_csc_P_dc']
         lock_csc_i_dc = params['lock_csc_i_dc']
         vdep_loads = params['vdep_loads']
         gens_redispatch = params['gens_redispatch']
+        P_transfer = params['P_transfer']
+        convert_loads_2_zip = params['loads_2_ZIP']
+        y_correction = params['y_correction']
 
         # Check shunt options
         if shunt_mode not in [self.CONTROL_MODE_LOCKED,
-                               self.CONTROL_MODE_REG]:
+                              self.CONTROL_MODE_REG]:
             raise ValueError('invalid shunts mode')
         if shunt_mode == self.CONTROL_MODE_REG and not shunt_limits:
             raise ValueError('unsupported shunts configuration')
 
         # Check tap options
         if tap_mode not in [self.CONTROL_MODE_LOCKED,
-                               self.CONTROL_MODE_REG]:
+                            self.CONTROL_MODE_REG]:
             raise ValueError('invalid taps mode')
         if tap_mode == self.CONTROL_MODE_REG and not tap_limits:
             raise ValueError('unsupported taps configuration')
+
+        # Check phase-shift options
+        if phase_shift_mode not in [self.CONTROL_MODE_LOCKED,
+                                    self.CONTROL_MODE_REG]:
+            raise ValueError('invalid phase-shifter mode')
+        if phase_shift_mode == self.CONTROL_MODE_REG and not phase_shift_limits:
+            raise ValueError('unsupported phase-shifter configuration')
 
         # Check Q options
         if Q_mode != self.CONTROL_MODE_REG:
@@ -175,6 +198,11 @@ class ACPF(PFmethod):
                       'regulator',
                       'reactive power')
 
+        net.set_flags('generator',
+                      'variable',
+                      'fixed power factor',
+                      'reactive power')
+
         # VSC HVDC
         net.set_flags('vsc converter',
                       'variable',
@@ -199,27 +227,53 @@ class ACPF(PFmethod):
                       'any',
                       'all')
 
-        # Loads
-        if vdep_loads:
+        # Load
+        if vdep_loads or convert_loads_2_zip:
             for load in net.loads:
-                if load.is_voltage_dependent() and load.is_in_service():
-                    net.set_flags_of_component(load,
-                                               'variable',
-                                               ['active power', 'reactive power'])
+                if load.is_in_service():
+                    if convert_loads_2_zip:      # Consider all loads
+                        net.set_flags_of_component(load,
+                                                   'variable',
+                                                   ['active power', 'reactive power'])
+                    if load.is_voltage_dependent():  # Consider only voltage dependent loads
+                        net.set_flags_of_component(load,
+                                                   'variable',
+                                                   ['active power', 'reactive power'])
 
-        # Tap changers
+        # Tap changer
         if tap_mode != self.CONTROL_MODE_LOCKED:
             net.set_flags('branch',
                           ['variable', 'fixed'],
                           'tap changer - v',
                           'tap ratio')
+            net.set_flags('branch',
+                          'variable',
+                          'tap changer - Q',
+                          'tap ratio')
+            if y_correction:
+                net.set_flags('branch', 
+                              'variable',
+                              'y correction - ratio', 
+                              'y scale') 
+        
+        # Phase-shifters
+        if phase_shift_mode != self.CONTROL_MODE_LOCKED:
+            net.set_flags('branch',
+                          'variable',
+                          'phase shifter',
+                          'phase shift')
+            if y_correction:
+                net.set_flags('branch', 
+                              'variable',
+                              'y correction - phase',
+                              'y scale')
 
-        # Switched shunts
-        if shunt_mode != self.CONTROL_MODE_LOCKED:
-            net.set_flags('shunt',
-                          ['variable', 'fixed'],
-                          'switching - v',
-                          'susceptance')
+        # Inter-area transfer
+        if P_transfer:
+            net.set_flags('transfer',
+                          'variable',
+                          'any',
+                          'all')
 
         # Set up problem
         problem = pfnet.Problem(net)
@@ -236,18 +290,36 @@ class ACPF(PFmethod):
         problem.add_constraint(pfnet.Constraint('VSC DC power control', net))
         problem.add_constraint(pfnet.Constraint('CSC DC power control', net))
         problem.add_constraint(pfnet.Constraint('CSC DC current control', net))
+        problem.add_constraint(pfnet.Constraint('fixed gen constant power factor', net))
 
         problem.add_constraint(pfnet.Constraint('PVPQ switching', net))
         problem.add_constraint(pfnet.Constraint('switching power factor regulation', net))
         problem.add_constraint(pfnet.Constraint('switching FACTS active power control', net))
         problem.add_constraint(pfnet.Constraint('switching FACTS reactive power control', net))
+        problem.add_constraint(pfnet.Constraint('switching FACTS series voltage control', net))
+        problem.add_constraint(pfnet.Constraint('switching FACTS series impedance control', net))
 
-        if vdep_loads:
+        if vdep_loads or convert_loads_2_zip:
             problem.add_constraint(pfnet.Constraint('load voltage dependence', net))
 
         if Q_limits:
             problem.add_heuristic(pfnet.Heuristic('PVPQ switching', net))
             problem.add_heuristic(pfnet.Heuristic('switching power factor regulation', net))
+
+        if P_transfer:
+            problem.add_constraint(pfnet.Constraint('switching area transfer regulation', net))
+            problem.add_heuristic(pfnet.Heuristic('switching area transfer regulation', net))
+        
+        if tap_mode != self.CONTROL_MODE_LOCKED:
+            problem.add_constraint(pfnet.Constraint('switching transformer q regulation', net))
+            problem.add_heuristic(pfnet.Heuristic('switching transformer q regulation', net))
+
+        if phase_shift_mode != self.CONTROL_MODE_LOCKED:
+            problem.add_constraint(pfnet.Constraint('switching transformer p regulation', net))
+            problem.add_heuristic(pfnet.Heuristic('switching transformer p regulation', net))
+
+        if y_correction and (tap_mode != self.CONTROL_MODE_LOCKED or phase_shift_mode != self.CONTROL_MODE_LOCKED):
+            problem.add_constraint(pfnet.Constraint('y correction table', net))
 
         problem.analyze()
 
@@ -277,6 +349,8 @@ class ACPF(PFmethod):
         shunt_limits = params['shunt_limits']
         tap_mode = params['tap_mode']
         tap_limits = params['tap_limits']
+        phase_shift_mode = params['phase_shift_mode']
+        phase_shift_limits = params['phase_shift_limits']
         lock_vsc_P_dc = params['lock_vsc_P_dc']
         lock_csc_P_dc = params['lock_csc_P_dc']
         lock_csc_i_dc = params['lock_csc_i_dc']
@@ -284,22 +358,32 @@ class ACPF(PFmethod):
         v_mag_warm_ref = params['v_mag_warm_ref']
         gens_redispatch = params['gens_redispatch']
         curtail_load_q = params['load_q_curtail']
+        P_transfer = params['P_transfer']
+        y_correction = params['y_correction']
 
         # Check shunt options
         if shunt_mode not in [self.CONTROL_MODE_LOCKED,
-                               self.CONTROL_MODE_FREE,
-                               self.CONTROL_MODE_REG]:
+                              self.CONTROL_MODE_FREE,
+                              self.CONTROL_MODE_REG]:
             raise ValueError('invalid shunts mode')
         if shunt_mode == self.CONTROL_MODE_REG and not shunt_limits:
             raise ValueError('unsupported shunts configuration')
 
         # Check tap options
         if tap_mode not in [self.CONTROL_MODE_LOCKED,
-                             self.CONTROL_MODE_FREE,
-                             self.CONTROL_MODE_REG]:
+                            self.CONTROL_MODE_FREE,
+                            self.CONTROL_MODE_REG]:
             raise ValueError('invalid taps mode')
         if tap_mode == self.CONTROL_MODE_REG and not tap_limits:
             raise ValueError('unsupported taps configuration')
+
+        # Check tap options
+        if phase_shift_mode not in [self.CONTROL_MODE_LOCKED,
+                                    self.CONTROL_MODE_FREE,
+                                    self.CONTROL_MODE_REG]:
+            raise ValueError('invalid phase-shifter mode')
+        if phase_shift_mode == self.CONTROL_MODE_REG and not phase_shift_limits:
+            raise ValueError('unsupported phase-shifter configuration')
 
         # Check Q options
         if Q_mode not in [self.CONTROL_MODE_REG,
@@ -329,7 +413,7 @@ class ACPF(PFmethod):
                           'any',
                           'voltage magnitude')
 
-        # Genertors
+        # Generators
         if gens_redispatch:
             # Assume slack gens (excep renewables) are redispatchable
             net.set_flags('generator',
@@ -344,6 +428,10 @@ class ACPF(PFmethod):
         net.set_flags('generator',
                       'variable',
                       'regulator',
+                      'reactive power')
+        net.set_flags('generator',
+                      'variable',
+                      'fixed power factor',
                       'reactive power')
         if Q_mode == self.CONTROL_MODE_FREE and Q_limits:
             net.set_flags('generator',
@@ -400,19 +488,58 @@ class ACPF(PFmethod):
                           'any',
                           'reactive power')
 
-        # Tap changers
+        # Trans tap mode
         if tap_mode != self.CONTROL_MODE_LOCKED:
             net.set_flags('branch',
                           'variable',
                           'tap changer - v',
                           'tap ratio')
-        if tap_mode == self.CONTROL_MODE_FREE and tap_limits:
             net.set_flags('branch',
-                          'bounded',
-                          'tap changer - v',
+                          'variable',
+                          'tap changer - Q',
                           'tap ratio')
+            # Trans reg limit
+            if tap_limits:
+                net.set_flags('branch',
+                            'bounded',
+                            'tap changer - v',
+                            'tap ratio')
+                net.set_flags('branch',
+                            'bounded',
+                            'tap changer - Q',
+                            'tap ratio')
+            # Y correction
+            if y_correction:
+                net.set_flags('branch',
+                              'variable',
+                              'y correction - ratio',
+                              ['tap ratio', 'y scale'])
 
-        # Swtiched shunts
+        # Trans phase-shifter mode
+        if phase_shift_mode != self.CONTROL_MODE_LOCKED:
+            net.set_flags('branch',
+                          'variable',
+                          'phase shifter',
+                          'phase shift')
+            # Reg limit
+            if phase_shift_limits:
+                net.set_flags('branch',
+                              'bounded',
+                              'phase shifter',
+                              'phase shift')
+                if net.get_num_asymmetric_phase_shifters() > 0:
+                    net.set_flags('branch',
+                                  ['variable', 'bounded'],
+                                  'asymmetric phase shifter',
+                                  'ratio')
+            # Y correction
+            if y_correction:
+                net.set_flags('branch',
+                              'variable',
+                              'y correction - phase',
+                              ['phase shift', 'y scale'])
+
+        # Switched shunts
         if shunt_mode != self.CONTROL_MODE_LOCKED:
             net.set_flags('shunt',
                           'variable',
@@ -423,6 +550,19 @@ class ACPF(PFmethod):
                           'bounded',
                           'switching - v',
                           'susceptance')
+
+        # Inter-area transfer
+        if P_transfer:
+            buses = net.get_area_slack_buses()
+            for bus in buses:
+                for gen in bus.generators:
+                    net.set_flags_of_component(gen,
+                                               'variable',
+                                               'active power')
+            net.set_flags('transfer',
+                          'variable',
+                          'any',
+                          'all')
 
         # Set up problem
         problem = pfnet.Problem(net)
@@ -436,6 +576,9 @@ class ACPF(PFmethod):
         problem.add_constraint(pfnet.Constraint('VSC DC voltage control', net))
         problem.add_constraint(pfnet.Constraint('CSC DC voltage control', net))
         problem.add_constraint(pfnet.Constraint('power factor regulation', net))
+        problem.add_constraint(pfnet.Constraint('switching FACTS series voltage control', net))
+        problem.add_constraint(pfnet.Constraint('switching FACTS series impedance control', net))
+        problem.add_constraint(pfnet.Constraint('fixed gen constant power factor', net))
 
         if lock_vsc_P_dc:
             problem.add_constraint(pfnet.Constraint('VSC DC power control', net))
@@ -467,9 +610,20 @@ class ACPF(PFmethod):
             problem.add_constraint(pfnet.Constraint('variable fixing', net))
 
         if tap_mode != self.CONTROL_MODE_LOCKED:
-            problem.add_function(pfnet.Function('tap ratio regularization', wc/(net.get_num_tap_changers_v(True)+1.), net))
+            problem.add_function(pfnet.Function('tap ratio regularization', wc/(net.get_num_tap_changers(True)+1.), net))
             if tap_mode == self.CONTROL_MODE_REG and tap_limits:
+                problem.add_function(pfnet.Function('transformer Q regularization', wc/(net.get_num_tap_changers_Q(True)+1.), net))
                 problem.add_constraint(pfnet.Constraint('voltage regulation by transformers', net))
+
+        if phase_shift_mode != self.CONTROL_MODE_LOCKED:
+            problem.add_function(pfnet.Function('phase shift regularization', wc/(net.get_num_phase_shifters(True)+1.), net))
+            if phase_shift_mode == self.CONTROL_MODE_REG and phase_shift_limits:
+                problem.add_function(pfnet.Function('transformer P regularization', wc/(net.get_num_phase_shifters(True)+1.), net))
+                if net.get_num_asymmetric_phase_shifters() > 0:
+                    problem.add_constraint(pfnet.Constraint('asymmetric transformer equations', net))
+
+        if y_correction and (tap_mode != self.CONTROL_MODE_LOCKED or phase_shift_mode != self.CONTROL_MODE_LOCKED):
+            problem.add_constraint(pfnet.Constraint("y correction table", net))
 
         if shunt_mode != self.CONTROL_MODE_LOCKED:
             problem.add_function(pfnet.Function('susceptance regularization', wc/(net.get_num_switched_v_shunts(True)+1.), net))
@@ -478,6 +632,9 @@ class ACPF(PFmethod):
 
         if vdep_loads:
             problem.add_constraint(pfnet.Constraint('load voltage dependence', net))
+
+        if P_transfer:
+            problem.add_constraint(pfnet.Constraint('area transfer regulation', net))
 
         if net.num_bounded > 0:
             problem.add_constraint(pfnet.Constraint('variable bounds', net))
@@ -493,10 +650,14 @@ class ACPF(PFmethod):
         params = self._parameters
         v_min_clip = params['v_min_clip']
         v_max_clip = params['v_max_clip']
+        shunt_mode = params['shunt_mode']
 
         if not update_net:
             # Copy network
             net = net.get_copy(merge_buses=True)
+
+        if shunt_mode != self.CONTROL_MODE_LOCKED:
+            net.round_discrete_switched_shunts_b()
 
         # Clipping
         for bus in net.buses:
@@ -526,6 +687,9 @@ class ACPF(PFmethod):
         vmin_thresh = params['vmin_thresh']
         solver_name = params['solver']
         solver_params = params['solver_parameters']
+        quiet = solver_params[solver_name]['quiet']
+        convert_loads_2_zip = params['loads_2_ZIP']
+        vmin_to_zip = params['v_min_2_ZIP']
 
         # Opt solver
         if solver_name == 'augl':
@@ -540,34 +704,249 @@ class ACPF(PFmethod):
             raise PFmethodError_BadOptSolver()
         solver.set_parameters(solver_params[solver_name])
 
+        shunt_actions = {sh.uid: [0, 0, sh.b] for sh in net.shunts if sh.is_in_service() and sh.is_switched_v()}
+        sh_reg_buses = [bus for bus in net.buses
+                        if bus.is_in_service() and
+                        len(bus.reg_shunts) > 0 and
+                        bus.v_max_reg > bus.v_min_reg and
+                        len([sh for sh in bus.reg_shunts if sh.is_switched_v() and sh.is_in_service()]) > 0]
+
+        locked_shunts = set()
+
+        def shunt_is_oscillating(uid):
+            return (shunt_actions[uid][0] + shunt_actions[uid][1] >= self.SWSH_CYCLE_LIMIT and
+                    shunt_actions[uid][0] > 0 and  # number of switching off (reactors)
+                    shunt_actions[uid][1] > 0 and  # number of switching on (capacitors)
+                    abs(shunt_actions[uid][0] - shunt_actions[uid][1]) <= 0.5 * self.SWSH_CYCLE_LIMIT
+                    )
+
         # Callbacks
         def c1(s):
+            """Apply Transformer Voltage Regulation"""
+            if s.get_status() == 'solved':
+                return
             if (s.k != 0 and params['tap_limits'] and tap_mode == self.CONTROL_MODE_REG and
                 norm(s.problem.f, np.inf) < 100.*solver_params['nr']['feastol']):
                 try:
                     self.apply_tran_v_regulation(s)
+                    if params['taps_round']:
+                        self.apply_tran_tap_rounding(s)
                 except Exception as e:
                     raise PFmethodError_TranVReg(e)
-
+                
         def c2(s):
-            if (s.k != 0 and params['shunt_limits'] and shunt_mode == self.CONTROL_MODE_REG and
-                norm(s.problem.f, np.inf) < 100.*solver_params['nr']['feastol']):
-                try:
-                    self.apply_shunt_v_regulation(s)
-                except Exception as e:
-                    raise PFmethodError_ShuntVReg(e)
+            """Apply Shunt Voltage Regulation"""
+            if (s.k != 0 and
+                    params['shunt_limits'] and
+                    shunt_mode == self.CONTROL_MODE_REG and
+                    s.get_status() == 'solved'):
+
+                total_swsh_actions = 0
+                swsh_actions = []
+                c2net = s.problem.wrapped_problem.network
+                xhat = s.get_primal_variables()
+                for bus in sh_reg_buses:   # c2net.buses:
+                    if not bus.is_in_service() or len(bus.reg_shunts) == 0:
+                        continue
+
+                    if bus.v_max_reg <= bus.v_min_reg:
+                        continue  # Will cause oscillations
+
+                    # Update target
+                    reg_shunts = [sh for sh in bus.reg_shunts if sh.is_switched_v() and sh.is_in_service()]
+
+                    if len(reg_shunts) == 0:
+                        continue
+
+                    bus_v = xhat[bus.index_v_mag]
+
+                    if bus.v_max_reg >= bus_v >= bus.v_min_reg:
+                        if s.swsh_call == 1:
+                            # approximate continuous shunts (only once to avoid oscillations)
+                            for sh in reg_shunts:
+                                if sh.is_continuous():
+                                    sh.b = ((sh.b_max - sh.b_min) / (sh.reg_bus.v_min_reg - sh.reg_bus.v_max_reg) * (
+                                                bus_v - sh.reg_bus.v_max_reg))
+                                    total_swsh_actions += 1
+
+                        continue  # No Control needed
+
+                    reactors_on = any([sh.b < 0. for sh in reg_shunts])
+                    caps_on = any([sh.b > 0. for sh in reg_shunts])
+                    if bus_v > bus.v_max_reg:
+                        assigned_b = False
+                        if caps_on:
+                            # Turn off caps first
+                            for sh in reg_shunts:
+                                if s.swsh_call >= self.SWSH_CYCLE_LIMIT:
+                                    if shunt_is_oscillating(sh.uid):
+                                        continue
+                                if sh.b > 0.:
+                                    # Move one step down
+                                    idx = max(np.argmin(np.abs(sh.b - sh.b_values)) - 1, 0)
+                                    swsh_actions.append([sh.uid, sh.b])
+                                    sh.b = sh.b_values[idx]
+                                    assigned_b = True
+                                    total_swsh_actions += 1
+                                    shunt_actions[sh.uid][0] += 1
+                                    break
+
+                        if assigned_b:
+                            continue
+
+                        # Turn on Reactors
+                        for sh in reg_shunts:
+                            if s.swsh_call >= self.SWSH_CYCLE_LIMIT:
+                                if shunt_is_oscillating(sh.uid):
+                                    continue
+                            # Move one step down
+                            idx = np.argmin(np.abs(sh.b - sh.b_values))
+                            if idx == 0:
+                                if abs(sh.b - sh.b_min) <= 1e-6:
+                                    continue  # Already at min
+                                else:
+                                    swsh_actions.append([sh.uid, sh.b])
+                                    sh.b = sh.b_min   # Round and consider as one step
+                                    total_swsh_actions += 1
+                                    shunt_actions[sh.uid][0] += 1
+                                    break
+
+                            idx = max(idx - 1, 0)   # move one step down
+                            swsh_actions.append([sh.uid, sh.b])
+                            sh.b = sh.b_values[idx]
+                            total_swsh_actions += 1
+                            shunt_actions[sh.uid][0] += 1
+                            break
+
+                    elif bus_v < bus.v_min_reg:
+                        assigned_b = False
+                        if reactors_on:
+                            # Turn off Reactors first
+                            for sh in reg_shunts:
+                                if s.swsh_call >= self.SWSH_CYCLE_LIMIT:
+                                    if shunt_is_oscillating(sh.uid):
+                                        continue
+                                if sh.b < 0.:
+                                    # Move one step up
+                                    idx = min(np.argmin(np.abs(sh.b - sh.b_values)) + 1, sh.b_values.__len__() - 1)
+                                    swsh_actions.append([sh.uid, sh.b])
+                                    sh.b = sh.b_values[idx]
+                                    total_swsh_actions += 1
+                                    assigned_b = True
+                                    shunt_actions[sh.uid][1] += 1
+                                    break
+
+                        if assigned_b:
+                            continue
+
+                        # Turn on caps
+                        for sh in reg_shunts:
+                            if s.swsh_call >= self.SWSH_CYCLE_LIMIT:
+                                if shunt_is_oscillating(sh.uid):
+                                    continue
+                            # Move one step up
+                            idx = np.argmin(np.abs(sh.b - sh.b_values))
+                            if idx == sh.b_values.__len__() - 1:
+                                if abs(sh.b - sh.b_max) <= 1e-6:
+                                    continue  # Already at max
+                                else:
+                                    swsh_actions.append([sh.uid, sh.b])
+                                    sh.b = sh.b_max   # Round and consider as one step
+                                    total_swsh_actions += 1
+                                    shunt_actions[sh.uid][1] += 1
+                                    break
+
+                            idx = min(idx + 1, sh.b_values.__len__() - 1)
+                            swsh_actions.append([sh.uid, sh.b])
+                            sh.b = sh.b_values[idx]
+                            total_swsh_actions += 1
+                            shunt_actions[sh.uid][1] += 1
+                            break
+
+                if not quiet:
+                    _print_swsh_adj = False
+                    for row in swsh_actions:
+                        uid = row[0]
+                        sh = c2net.get_shunt_from_uid(uid)
+                        if not _print_swsh_adj:
+                            print("\nSWITCHED SHUNTS ADJUSTED:")
+                            print(" X----------- AT BUS ----------X    OLD Q    NEW Q")
+                            _print_swsh_adj = True
+
+                        print("{:^12} [{:^18s}] {:^8.2f} {:^8.2f}".format(sh.bus.number,
+                                                                          sh.bus.name,
+                                                                          row[1] * c2net.base_power,
+                                                                          sh.b * c2net.base_power))
+
+                    if _print_swsh_adj:
+                        print('\n', end='')
+                    _print_swsh_adj = False
+                    for uid in shunt_actions.keys():
+                        sh = c2net.get_shunt_from_uid(uid)
+                        if uid in locked_shunts:
+                            continue
+                        if s.swsh_call >= self.SWSH_CYCLE_LIMIT and shunt_is_oscillating(sh.uid):
+                            locked_shunts.add(uid)
+                            if not _print_swsh_adj:
+                                print("\nSWITCHED SHUNTS LOCKED DUE TO OSCILLATIONS:")
+                                print(" X----------- AT BUS ----------X     Q ")
+                                _print_swsh_adj = True
+
+                            print("{:^12} [{:^18s}] {:^8.2f}".format(sh.bus.number,
+                                                                     sh.bus.name,
+                                                                     sh.b * c2net.base_power))
+                    if _print_swsh_adj:
+                        print('\n', end='')
+
+                # Output
+                s.num_reg = total_swsh_actions
 
         def c3(s):
-            if (s.k >= params['pvpq_start_k'] and params['Q_limits'] and Q_mode == self.CONTROL_MODE_REG):
+            """PV-PQ start at given iteration"""
+            if s.get_status() == 'solved':
+                return
+            if s.k >= params['pvpq_start_k'] and params['Q_limits'] and Q_mode == self.CONTROL_MODE_REG:
                 prob = s.problem.wrapped_problem
                 prob.apply_heuristics(s.x)
                 s.problem.A = prob.A
                 s.problem.b = prob.b
 
+        def c4(s):
+            if s.get_status() == 'solved':
+                return
+            if np.min(s.problem.wrapped_problem.network.bus_v_min) <= vmin_to_zip:
+                c4net = s.problem.wrapped_problem.network
+                for lod in c4net.loads:
+                    if lod.is_in_service():
+                        bus_v = s.get_primal_variables()[lod.bus.index_v_mag]
+                        if isinstance(bus_v, Iterable):
+                            i = np.argmin(bus_v)
+                            if bus_v[i] <= vmin_to_zip:
+                                # Move cp&ci to cg
+                                lod.comp_cg = lod.comp_cp[i] + lod.comp_ci[i] + lod.comp_cg
+                                lod.comp_cp = [0.0]*len(bus_v)
+                                lod.comp_ci = [0.0]*len(bus_v)
+                                # Move cq&cj to cb
+                                lod.comp_cb = lod.comp_cb - lod.comp_cq[i] - lod.comp_cj[i]
+                                lod.comp_cq = [0.0]*len(bus_v)
+                                lod.comp_cj = [0.0]*len(bus_v)
+                        else:
+                            if bus_v <= vmin_to_zip:
+                                # Move cp&ci to cg
+                                lod.comp_cg = lod.comp_cp + lod.comp_ci + lod.comp_cg
+                                lod.comp_cp = 0.0
+                                lod.comp_ci = 0.0
+                                # Move cq&cj to cb
+                                lod.comp_cb = lod.comp_cb - lod.comp_cq - lod.comp_cj
+                                lod.comp_cq = 0.0
+                                lod.comp_cj = 0.0
+
         if solver_name == 'nr':
             solver.add_callback(OptCallback(c1))
             solver.add_callback(OptCallback(c2))
             solver.add_callback(OptCallback(c3))
+            if convert_loads_2_zip:
+                solver.add_callback(OptCallback(c4))
 
         # Termination
         def t1(s):
@@ -603,6 +982,13 @@ class ACPF(PFmethod):
                     net.clear_sensitivities()
                     if solver_name != 'nr':
                         problem.store_sensitivities(*solver.get_dual_variables())
+
+            if not quiet and convert_loads_2_zip and solver.problem.wrapped_problem.network.bus_v_min <= vmin_to_zip:
+                for lod in net.loads:
+                    if lod.is_in_service():
+                        bus_v = solver.get_primal_variables()[lod.bus.index_v_mag]
+                        if bus_v <= vmin_to_zip:
+                            print(f"  Converted load {lod.name}, at bus {lod.bus.number} with v_mag={bus_v:>1.4f} to ZIP load")
 
             # Save results
             self.set_solver_name(solver_name)
@@ -777,7 +1163,6 @@ class ACPF(PFmethod):
             if bus.is_regulated_by_tran(True) and not bus.is_slack():
 
                 assert(bus.has_flags('variable','voltage magnitude'))
-
                 for tau in range(net.num_periods):
 
                     v = x[bus.index_v_mag[tau]]
@@ -825,6 +1210,71 @@ class ACPF(PFmethod):
                             if np.abs(tnew-t) > eps:
                                 break
 
+        # Update
+        solver.func(x)
+        p.update_lin()
+        solver.problem.A = p.A
+        solver.problem.b = p.b
+
+    def apply_tran_tap_rounding(self, solver):
+        """Apply transformer voltage regualtion using descrete mode."""
+
+        # Local variables
+        p = solver.problem.wrapped_problem
+        net = p.network
+        x = solver.x
+        eps = 1e-8
+
+        # Fix constraints
+        c = p.find_constraint('variable fixing')
+        A = c.A
+        b = c.b
+
+        for i in range(net.num_branches):
+
+            br = net.get_branch(i)
+
+            if br.is_in_service() and br.is_tap_changer():
+
+                assert(br.reg_bus.has_flags('variable', 'voltage magnitude'))
+                for tau in range(net.num_periods):
+
+                    if(br.has_flags('variable', 'tap ratio')):
+                        # Ratio is variable
+                        cur_ratio = x[br.index_ratio[tau]]
+                        if cur_ratio > br.ratio_max:
+                            x[br.index_ratio[tau]] = br.ratio_max
+                        elif cur_ratio < br.ratio_min:
+                            x[br.index_ratio[tau]] = br.ratio_min
+                        else:
+                            # Find closest ratio
+                            dratio = (br.ratio_max - br.ratio_min) / (br.num_ratios-1)
+                            ptn_ratios = np.arange(0, br.num_ratios)*dratio + br.ratio_min
+                            i_close = np.argmin(np.abs(ptn_ratios - cur_ratio))
+                            new_ratio = ptn_ratios[i_close]
+
+                            # Fix constr index
+                            k = int(np.where(A.col == br.index_ratio[tau])[0])
+                            ik = A.row[k]
+                            assert(np.abs(b[ik]-x[br.index_ratio[tau]]) < eps)
+                            assert(A.data[k] == 1.)
+
+                            # Update var and constraint
+                            x[br.index_ratio[tau]] = new_ratio
+                            b[ik] = new_ratio
+                    else:
+                        # Ratio not variable
+                        if br.ratio > br.ratio_max:
+                            br.ratio = br.ratio_max
+                        elif br.ratio < br.ratio_min:
+                            br.ratio = br.ratio_min
+                        else:
+                            # Find closest ratio
+                            dratio = (br.ratio_max - br.ratio_min) / (br.num_ratios-1)
+                            ptn_ratios = np.arange(0, br.num_ratios)*dratio + br.ratio_min
+                            i_close = np.argmin(np.abs(ptn_ratios - br.ratio))
+                            br.ratio = ptn_ratios[i_close]
+                        
         # Update
         solver.func(x)
         p.update_lin()
